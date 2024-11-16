@@ -12,18 +12,20 @@ struct EchoService : rpc::Service {
 };
 
 template <typename T>
-struct DummyClient : rpc::Remote<T> {
+struct MockClient : rpc::Remote<T, MockClient<T>> {
     T server;
     rpc::Message current{};
 
-    explicit DummyClient(T server_) : server(server_){}
+    explicit MockClient(T server_) : server(server_){}
 
 
     void send(rpc::Message message){
+        // stash message
         current = message;
     }
 
-    auto recv(){
+    rpc::Message recv(){
+        // evaluate call, produce return value
         auto ret = server.dispatch(current);
         return ret;
     }
@@ -31,7 +33,7 @@ struct DummyClient : rpc::Remote<T> {
 
 int main(){
     auto service = EchoService{};
-    auto client = DummyClient<EchoService>{service};
+    auto client = MockClient<EchoService>{service};
 
     auto msg = rpc::Message{.kind=rpc::Message::FNC_REQ, .opcode=1};
     service.dispatch(msg);

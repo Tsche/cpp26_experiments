@@ -9,23 +9,6 @@
 #include "util/meta.hpp"
 
 namespace rpc {
-template <auto, int>
-struct RemoteCall;
-
-template <typename T, template <std::meta::info, std::size_t> class Proxy>
-consteval auto make_proxy_t(){
-    struct RemoteImpl;
-    return define_aggregate(^RemoteImpl,
-        meta::member_functions_of(^T)
-            | std::views::transform([index=0](std::meta::info r) mutable {
-                auto type = substitute(^Proxy, {reflect_value(r), std::meta::reflect_value(index++)});
-                return data_member_spec(type, {.name=identifier_of(r)});
-            }));
-}
-
-template <typename T, template <std::meta::info, std::size_t> class Proxy = RemoteCall>
-using Remote = [:make_proxy_t<std::remove_cvref_t<T>, Proxy>():];
-
 struct Message {
     enum Kind : std::uint8_t {
         FNC_REQ,
@@ -99,8 +82,11 @@ struct Function<T(Args...)>{
     }
 };
 
-template <std::meta::info Meta, int Idx>
-struct RemoteCall<Meta, Idx>{
+template <typename, typename>
+struct Remote;
+
+template <std::meta::info Meta, int Idx, typename U>
+struct RemoteCall{
     static constexpr auto index = Idx;
 
     using parent_type = [:parent_of(Meta):];
@@ -108,16 +94,17 @@ struct RemoteCall<Meta, Idx>{
     using member_type = function_type::template as_pmf<parent_type>;
     using return_type = function_type::return_type;
     
-    template <typename Sink>
-    return_type operator()(Sink& client, auto... args) const {
+    Remote<parent_type, U>* this_ptr;
+
+    return_type operator()(auto... args) const {
         auto msg = function_type::template serialize<Idx>(args...);
-        client.send(msg);
+        this_ptr->do_send(msg);
 
         // block until recv returns
         if constexpr (std::is_void_v<return_type>){
-            client.recv();
+            this_ptr->do_recv();
         } else {
-            auto msg = client.recv();
+            auto msg = this_ptr->do_recv();
             auto parser = MessageParser{msg};
             return parser.read_field<return_type>();
         }
@@ -139,19 +126,51 @@ struct RemoteCall<Meta, Idx>{
 };
 
 
+template <typename T, typename U>
+consteval auto make_proxy_t(){
+    struct Proxy;
+    return define_aggregate(^Proxy,
+        meta::member_functions_of(^T)
+            | std::views::transform([index=0](std::meta::info r) mutable {
+                auto type = substitute(^RemoteCall, {reflect_value(r), std::meta::reflect_value(index++), ^U});
+                return data_member_spec(type, {.name=identifier_of(r)});
+            }));
+}
+template <typename T, typename U = void>
+using RemoteImpl = [:make_proxy_t<std::remove_cvref_t<T>, U>():];
+
+template <typename T, typename U>
+struct Remote : RemoteImpl<T, U> {
+    constexpr Remote() : RemoteImpl<T, U>{make_base()} {}
+
+private:
+    template <std::meta::info, int, typename>
+    friend struct RemoteCall;
+
+    void do_send(Message message){ static_cast<U*>(this)->send(message); }
+    Message do_recv(){ return static_cast<U*>(this)->recv(); }
+
+    constexpr auto make_base() {
+        return [this]<std::size_t... Idx>(std::index_sequence<Idx...>){
+            return RemoteImpl<T, U>{((void)Idx, this)...};
+        }(std::make_index_sequence<nonstatic_data_members_of(^RemoteImpl<T>).size()>{});
+    }
+};
+
 namespace impl{
 template <typename T, std::meta::info... Members>
 constexpr Message do_dispatch(T&& obj, Message msg){
-    constexpr static auto proxy = Remote<T>{};
+    constexpr static auto proxy = RemoteImpl<std::remove_cvref_t<T>>{};
+
     using dispatch_type = Message(*)(std::remove_cvref_t<T>, Message);
     dispatch_type fnc = nullptr;
-    (void)((proxy.[:Members:].index == msg.opcode ? fnc = &decltype(proxy.[:Members:])::eval, true : false) || ...);
+    bool success = ((proxy.[:Members:].index == msg.opcode ? fnc = &decltype(proxy.[:Members:])::eval, true : false) || ...);
     return fnc(obj, msg);
 }
 
 template <typename T>
 consteval auto get_dispatcher(){
-    using proxy_type = Remote<T>;
+    using proxy_type = RemoteImpl<std::remove_cvref_t<T>>;
 
     std::vector args = {^T};
     for (auto member: nonstatic_data_members_of(^proxy_type)){
@@ -168,5 +187,4 @@ auto dispatch(this T&& self, Message msg){
     return dispatcher(self, msg);
 }
 };
-
 }
