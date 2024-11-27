@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 26)
 
 add_library(experiments SHARED "")
 target_compile_options(experiments PUBLIC "-stdlib=libc++" "-freflection" "-ftime-trace" "-O3")
-# target_link_options(experiments PUBLIC "-stdlib=libc++" "-lc++abi")
+target_link_options(experiments PUBLIC "-stdlib=libc++" "-lc++abi")
 
 
 add_subdirectory(src)

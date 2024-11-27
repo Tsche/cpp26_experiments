@@ -16,7 +16,6 @@ template <typename T>
 struct Reflect{
     static_assert(false, "Cannot reflect T");
 };
-
 template <std::integral T>
 struct Reflect<T> {
     static void serialize(T arg, Message& target) {
@@ -81,14 +80,19 @@ struct Reflect<T> {
     }
 
     template <std::size_t Extent = std::dynamic_extent>
-    static T deserialize(MessageParser<Extent>& buffer) {
+    static auto deserialize(MessageParser<Extent>& buffer) {
         std::uint32_t size = buffer.template get_field<std::uint32_t>();
         std::vector<element_type> elements{};
         elements.reserve(size);
         for (std::uint32_t idx = 0; idx < size; ++idx){
             elements.push_back(buffer.template get_field<element_type>());
         }
-        return T(begin(elements), end(elements));
+        if constexpr (is_template(^T) && template_of(^T) == ^std::basic_string_view){
+            // cannot serialize to non-owning view, produce string instead
+            return std::string(begin(elements), end(elements));
+        } else {
+            return T(begin(elements), end(elements));
+        }
     }
 };
 
@@ -110,6 +114,16 @@ struct Reflect<T[N]> {
         return elements;
     }
 };
+
+namespace util{
+template <typename T>
+concept pair_like = requires(T t) {
+  t.first;
+  t.second;
+  requires std::is_same_v<typename T::first_type, decltype(t.first)>;
+  requires std::is_same_v<typename T::second_type, decltype(t.second)>;
+};
+}
 
 template <util::pair_like T>
 struct Reflect<T> {
@@ -139,15 +153,27 @@ struct Reflect<T>{
     } 
 };
 
+template <template <typename...> class Variant, typename... Ts>
+  requires std::derived_from<Variant<Ts...>, std::variant<Ts...>>
+struct Reflect<Variant<Ts...>> {
+    static void serialize(auto&& arg, Message& target) {
+        Reflect<std::size_t>::serialize(arg.index(), target);
+        std::visit([&](auto&& alt){
+            Reflect<std::remove_cvref_t<decltype(alt)>>::serialize(alt, target);
+        }, arg);
+    }
 
-// template <std::floating_point T>
-// struct Reflect<T>{
-//     using type = T;
-// };
-
-// template <template <typename...> class Variant, typename... Ts>
-//   requires std::derived_from<Variant<Ts...>, std::variant<Ts...>>
-// struct Reflect<Variant<Ts...>> {
-// };
-
+    template <std::size_t Extent = std::dynamic_extent>
+    static decltype(auto) deserialize(MessageParser<Extent>& buffer) {
+        auto index = Reflect<std::size_t>::deserialize(buffer);
+        return [&]<std::size_t... Idx>(std::index_sequence<Idx...>){
+            union Storage {
+                char dummy{};
+                Variant<Ts...> variant;
+            } storage;
+            (void)((Idx == index?(std::construct_at(&storage.variant, Reflect<Ts...[Idx]>::deserialize(buffer)), true) : false) || ...);
+            return std::move(storage.variant);
+        }(std::index_sequence_for<Ts...>{});
+    } 
+};
 }

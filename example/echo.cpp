@@ -26,6 +26,7 @@ struct TCPTransport {
                      .checksum = std::uint16_t(header[3] << 8 | header[2]),
                      .size = 0}};
     msg.reserve(size);
+    msg.header.size=size;
     cursor = 0;
     while (cursor != size) {
       auto ret = read(fd, (char*)msg.data() + cursor, size - cursor);
@@ -151,7 +152,7 @@ struct EchoService : rpc::Service {
 
 int main() {
   int pid = fork();
-  static constexpr auto port = 5321;
+  static constexpr auto port = 5324;
   if (pid > 0) {
     auto service = EchoService{};
     auto server = TCPServer{};
