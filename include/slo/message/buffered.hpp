@@ -1,25 +1,37 @@
 #pragma once
-#include <algorithm>
-#include <cstddef>
-#include <cstring>
-#include <cstdint>
-#include <cstdlib>
 #include <new>
+#include <vector>
 #include <span>
-#include <experimental/meta>
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
 
-#include "reflect.hpp"
+namespace slo::message {
 
-namespace rpc {
-template <typename T>
-struct Reflect;
+struct HeapBuffer {
+  std::span<char> read(std::size_t n, std::size_t offset = 0) { return {buffer.data() + offset, n}; }
+  HeapBuffer& write(void const* data, std::size_t n) {
+    copy(static_cast<char const*>(data), static_cast<char const*>(data) + n, back_inserter(buffer));
+    return *this;
+  }
+
+  HeapBuffer& reserve(std::size_t n) {
+    buffer.reserve(n);
+    return *this;
+  }
+
+  std::span<char> finalize() { return buffer; }
+
+private:
+  std::vector<char> buffer;
+};
 
 template <std::size_t inline_capacity = std::hardware_destructive_interference_size>
-class MessageWriter {
+class HybridBuffer {
 public:
-  MessageWriter() { std::memset(storage.buffer, 0, sizeof(storage.buffer)); }
+  HybridBuffer() { std::memset(storage.buffer, 0, sizeof(storage.buffer)); }
 
-  MessageWriter(const MessageWriter& other) {
+  HybridBuffer(const HybridBuffer& other) {
     if (other.cursor <= inline_capacity) {
       std::memcpy(storage.buffer, other.storage.buffer, other.cursor);
     } else {
@@ -30,7 +42,7 @@ public:
     }
   }
 
-  MessageWriter(MessageWriter&& other) noexcept {
+  HybridBuffer(HybridBuffer&& other) noexcept {
     if (other.cursor <= inline_capacity) {
       std::memcpy(storage.buffer, other.storage.buffer, other.cursor);
     } else {
@@ -41,29 +53,29 @@ public:
     }
   }
 
-  MessageWriter& operator=(const MessageWriter& other) {
+  HybridBuffer& operator=(const HybridBuffer& other) {
     if (this != &other) {
-      this->~MessageWriter();
-      new (this) MessageWriter(other);
+      this->~HybridBuffer();
+      new (this) HybridBuffer(other);
     }
     return *this;
   }
 
-  MessageWriter& operator=(MessageWriter&& other) noexcept {
+  HybridBuffer& operator=(HybridBuffer&& other) noexcept {
     if (this != &other) {
-      this->~MessageWriter();
-      new (this) MessageWriter(std::move(other));
+      this->~HybridBuffer();
+      new (this) HybridBuffer(std::move(other));
     }
     return *this;
   }
 
-  ~MessageWriter() {
+  ~HybridBuffer() {
     if (cursor > inline_capacity) {
       std::free(storage.heap.ptr);
     }
   }
 
-  MessageWriter& extend(const void* input_data, unsigned length) {
+  HybridBuffer& write(void const* input_data, unsigned length) {
     if (cursor + length <= inline_capacity) {
       // use inline buffer
       std::memcpy(storage.buffer + cursor, input_data, length);
@@ -81,7 +93,7 @@ public:
     return *this;
   }
 
-  MessageWriter& reserve(unsigned num_bytes) {
+  HybridBuffer& reserve(unsigned num_bytes) {
     if (cursor + num_bytes <= inline_capacity) {
       return *this;
     }
@@ -93,7 +105,7 @@ public:
     return *this;
   }
 
-  auto payload() const { return std::span(data(), size()); }
+  std::span<char> finalize() { return std::span(data(), size()); }
 
   [[nodiscard]] char const* data() const {
     return cursor <= inline_capacity ? static_cast<char const*>(storage.buffer)
@@ -101,12 +113,6 @@ public:
   }
 
   [[nodiscard]] std::size_t size() const { return cursor; }
-
-  template <typename T>
-  MessageWriter& add_field(T&& arg) {
-    Reflect<std::remove_cvref_t<T>>::serialize(std::forward<T>(arg), *this);
-    return *this;
-  }
 
 private:
   union Storage {
@@ -137,43 +143,4 @@ private:
   }
 };
 
-template <std::size_t Extent = std::dynamic_extent>
-struct MessageParser {
-  std::span<char const, Extent> payload;
-  unsigned cursor = 0;
-
-  char const* current() { return payload.data() + cursor; }
-
-  bool has_n(unsigned num_bytes) { return cursor + num_bytes <= payload.size(); }
-
-  template <typename T>
-  constexpr decltype(auto) get() {
-    return Reflect<T>::deserialize(*this);
-  }
-};
-
-struct Message {
-  enum Flags : std::uint8_t { RET = 0U, REQ = 1U << 1U, FNC = 1U << 2U, ONEWAY = 1U << 3U };
-
-  Flags kind;
-  std::uint8_t opcode;
-  std::uint16_t checksum;
-  std::uint32_t size;
-
-  static constexpr auto inline_capacity =
-      std::hardware_destructive_interference_size - (sizeof(kind) + sizeof(opcode) + sizeof(checksum) + sizeof(size));
-  union {
-    char buffer[inline_capacity];
-    char* heap;
-  } data;
-
-  [[nodiscard]] std::span<char const> get_data() const {
-    auto* payload = size > inline_capacity ? data.heap : data.buffer;
-    return {payload, size};
-  }
-
-  [[nodiscard]] std::size_t get_index() const{
-    return opcode;
-  }
-};
-}  // namespace rpc
+}

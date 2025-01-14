@@ -4,10 +4,10 @@
 #include <vector>
 #include <concepts>
 
-#include "message.hpp"
-#include "reflect.hpp"
-#include "util/meta.hpp"
-#include "util/stamp.hpp"
+#include "../message.hpp"
+#include "../reflect.hpp"
+#include "../util/meta.hpp"
+#include "../util/stamp.hpp"
 
 namespace rpc {
 namespace impl {
@@ -56,15 +56,15 @@ template <typename T, typename U>
 consteval auto make_proxy_t() {
   struct Proxy;
 
-  std::vector args = {data_member_spec(^U*)};
+  std::vector args = {data_member_spec(^^U*)};
   int index        = 0;
 
-  for (auto member_fnc : meta::member_functions_of(^T)) {
-    auto type = substitute(^CallProxy, {reflect_value(member_fnc), std::meta::reflect_value(index++), ^Proxy});
+  for (auto member_fnc : meta::member_functions_of(^^T)) {
+    auto type = substitute(^^CallProxy, {reflect_value(member_fnc), std::meta::reflect_value(index++), ^^Proxy});
     args.push_back(data_member_spec(type, {.name = identifier_of(member_fnc)}));
   }
 
-  return define_aggregate(^Proxy, args);
+  return define_aggregate(^^Proxy, args);
 }
 
 #define $generate_case(Idx)                                  \
@@ -129,12 +129,12 @@ auto make_proxy(U& client) {
 namespace impl {
 template <typename Protocol, typename T>
 consteval auto get_dispatcher() {
-  std::vector args = {^T};
-  for (auto member : nonstatic_data_members_of(^Proxy<T, Protocol>)) {
+  std::vector args = {^^T};
+  for (auto member : nonstatic_data_members_of(^^Proxy<T, Protocol>)) {
     args.push_back(type_of(member));
   }
   using fnc_type = typename Protocol::message_type (*)(T&&, std::size_t, std::span<char const>);
-  return extract<fnc_type>(substitute(^do_dispatch, args));
+  return extract<fnc_type>(substitute(^^do_dispatch, args));
 }
 }  // namespace impl
 

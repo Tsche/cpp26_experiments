@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.30)
-project(experiments)
+project(slo)
 
 set(CMAKE_COLOR_DIAGNOSTICS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -10,6 +10,9 @@ add_library(experiments SHARED "")
 target_compile_options(experiments PUBLIC "-stdlib=libc++" "-freflection" "-ftime-trace" "-O3")
 target_link_options(experiments PUBLIC "-stdlib=libc++" "-lc++abi")
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+target_link_libraries(experiments PUBLIC Threads::Threads)
 
 add_subdirectory(src)
 

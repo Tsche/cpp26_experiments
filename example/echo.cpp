@@ -1,6 +1,6 @@
 #include <cstdio>
-#include <experiments/rpc.hpp>
-#include "experiments/message.hpp"
+#include <slo/rpc/rpc.hpp>
+#include "slo/message.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -63,9 +63,6 @@ struct TCPTransport : P {
     }
   }
 };
-
-template <typename... Services>
-struct Server {};
 
 template <typename P>
 struct TCPServer {

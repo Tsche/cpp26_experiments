@@ -5,9 +5,9 @@
 template <typename... Ts> struct Tuple {
   struct Storage;
 
-  static_assert(is_type(define_aggregate(^Storage,
+  static_assert(is_type(define_aggregate(^^Storage,
                                          {
-                                             data_member_spec(^Ts)...})));
+                                             data_member_spec(^^Ts)...})));
   Storage data;
 
   Tuple() : data{} {}
@@ -20,7 +20,7 @@ struct std::tuple_size<Tuple<Ts...>>
 
 template <std::size_t I, typename... Ts>
 struct std::tuple_element<I, Tuple<Ts...>> {
-  static constexpr std::array types = {^Ts...};
+  static constexpr std::array types = {^^Ts...};
   using type = [:types[I]:];
 };
 

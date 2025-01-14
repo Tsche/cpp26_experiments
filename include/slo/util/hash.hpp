@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace util {
+namespace slo::util {
 
 constexpr std::uint32_t fnv1a(char const* str, std::size_t size) {
   std::uint32_t hash = 16777619UL;
