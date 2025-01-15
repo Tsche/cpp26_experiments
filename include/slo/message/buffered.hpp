@@ -5,11 +5,12 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 
 namespace slo::message {
 
 struct HeapBuffer {
-  std::span<char> read(std::size_t n, std::size_t offset = 0) { return {buffer.data() + offset, n}; }
+  std::span<char const> read(std::size_t n, std::size_t offset = 0) { return {buffer.data() + offset, n}; }
   HeapBuffer& write(void const* data, std::size_t n) {
     copy(static_cast<char const*>(data), static_cast<char const*>(data) + n, back_inserter(buffer));
     return *this;
@@ -20,7 +21,7 @@ struct HeapBuffer {
     return *this;
   }
 
-  std::span<char> finalize() { return buffer; }
+  std::span<char const> finalize() const { return buffer; }
 
 private:
   std::vector<char> buffer;
@@ -32,24 +33,24 @@ public:
   HybridBuffer() { std::memset(storage.buffer, 0, sizeof(storage.buffer)); }
 
   HybridBuffer(const HybridBuffer& other) {
-    if (other.cursor <= inline_capacity) {
-      std::memcpy(storage.buffer, other.storage.buffer, other.cursor);
-    } else {
+    if (other.is_heap()) {
       storage.heap.ptr = static_cast<char*>(std::malloc(other.storage.heap.capacity));
       // assume allocating memory always works
       storage.heap.capacity = other.storage.heap.capacity;
       std::memcpy(storage.heap.ptr, other.storage.heap.ptr, other.cursor);
+    } else {
+      std::memcpy(storage.buffer, other.storage.buffer, other.cursor);
     }
   }
 
   HybridBuffer(HybridBuffer&& other) noexcept {
-    if (other.cursor <= inline_capacity) {
-      std::memcpy(storage.buffer, other.storage.buffer, other.cursor);
-    } else {
+    if (is_heap()) {
       storage.heap.ptr       = other.storage.heap.ptr;
       storage.heap.capacity  = other.storage.heap.capacity;
       other.storage.heap.ptr = nullptr;
       other.cursor           = 0;
+    } else {
+      std::memcpy(storage.buffer, other.storage.buffer, other.cursor);
     }
   }
 
@@ -70,49 +71,56 @@ public:
   }
 
   ~HybridBuffer() {
-    if (cursor > inline_capacity) {
+    if (is_heap()) {
       std::free(storage.heap.ptr);
     }
   }
 
   HybridBuffer& write(void const* input_data, unsigned length) {
-    if (cursor + length <= inline_capacity) {
-      // use inline buffer
-      std::memcpy(storage.buffer + cursor, input_data, length);
-    } else {
-      if (cursor <= inline_capacity) {
-        // transition to heap once inline buffer is exhausted
-        allocate_heap(std::max(cursor + length, inline_capacity * 2));
-      } else if (cursor + length > storage.heap.capacity) {
+    auto new_size = size() + length;
+    if (is_heap()) {
+      if (new_size > storage.heap.capacity) {
         // resize if necessary
-        resize_heap(cursor + length);
+        resize_heap(new_size);
       }
-      std::memcpy(storage.heap.ptr + cursor, input_data, length);
+    } else {
+      if (new_size <= inline_capacity) {
+        // use inline buffer
+        std::memcpy(storage.buffer + cursor, input_data, length);
+        cursor += length;
+        return *this;
+      } else {
+        // transition to heap once inline buffer is exhausted
+        allocate_heap(std::max(cursor + length, (long long)inline_capacity * 2));
+      }
     }
-    cursor += length;
+    std::memcpy(storage.heap.ptr + size(), input_data, length);
+    cursor -= length;
     return *this;
   }
 
   HybridBuffer& reserve(unsigned num_bytes) {
-    if (cursor + num_bytes <= inline_capacity) {
-      return *this;
-    }
-    if (cursor <= inline_capacity) {
-      allocate_heap(cursor + num_bytes);
-    } else if (cursor + num_bytes > storage.heap.capacity) {
-      resize_heap(cursor + num_bytes);
+    auto new_size = size() + num_bytes;
+    if (is_heap()) {
+      resize_heap(new_size);
+    } else if (new_size > inline_capacity) {
+      // transition to heap
+      allocate_heap(new_size);
     }
     return *this;
   }
 
-  std::span<char> finalize() { return std::span(data(), size()); }
+  [[nodiscard]] std::span<char const> read(std::size_t n, std::size_t offset = 0) { return {data() + offset, n}; }
+
+  [[nodiscard]] std::span<char const> finalize() const { return std::span(data(), size()); }
 
   [[nodiscard]] char const* data() const {
-    return cursor <= inline_capacity ? static_cast<char const*>(storage.buffer)
-                                     : static_cast<char const*>(storage.heap.ptr);
+    return is_heap() ? static_cast<char const*>(storage.heap.ptr)
+                     : static_cast<char const*>(storage.buffer);
   }
 
-  [[nodiscard]] std::size_t size() const { return cursor; }
+  [[nodiscard]] std::size_t size() const { return is_heap() ? -cursor - 1 : cursor; }
+  [[nodiscard]] bool is_heap() const { return cursor < 0; }
 
 private:
   union Storage {
@@ -124,8 +132,9 @@ private:
 
     Storage() { std::memset(buffer, 0, sizeof(buffer)); }
   };
-  std::size_t cursor{0};
   Storage storage;
+  // sign indicates whether the internal buffer is used or not
+  long long cursor{0};
 
   void allocate_heap(unsigned initial_capacity) {
     char* new_ptr = static_cast<char*>(std::malloc(initial_capacity));
@@ -133,6 +142,11 @@ private:
     // assert(new_ptr);
     std::memcpy(new_ptr, storage.buffer, cursor);
     storage.heap = {new_ptr, initial_capacity};
+
+    if (cursor >= 0) {
+      // -1 => heap at cursor 0
+      cursor = -cursor - 1;
+    }
   }
 
   void resize_heap(std::uint32_t new_capacity) {
@@ -143,4 +157,4 @@ private:
   }
 };
 
-}
+}  // namespace slo::message

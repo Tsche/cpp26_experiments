@@ -4,6 +4,6 @@ project(slo)
 
 # add_executable(echo "echo.cpp")
 # target_link_libraries(echo PRIVATE experiments)
-
+target_compile_options(experiments PUBLIC "-O3")
 add_executable(logging "logging.cpp")
 target_link_libraries(logging PRIVATE experiments)

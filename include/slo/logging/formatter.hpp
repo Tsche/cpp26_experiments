@@ -1,4 +1,5 @@
 #pragma once
+#include <ctime>
 #include <string_view>
 #include <span>
 #include <source_location>
@@ -8,24 +9,23 @@
 
 #include <slo/message.hpp>
 #include <slo/message/buffered.hpp>
-#include <slo/transport/queue.hpp>
+#include <slo/network/transport/queue.hpp>
 #include <slo/util/fixed_string.hpp>
 
 #include "message.hpp"
 
 namespace slo::logging {
-using formatter_type = Message (*)(std::span<char>);
+using formatter_type = Message (*)(std::span<char const>, Prelude);
 
 namespace impl {
 
 template <util::fixed_string fmt_string, Location loc, typename... Args>
-Message format(std::span<char> data) {
+Message format(std::span<char const> data, Prelude meta) {
   auto fmt = std::format_string<Args...>{fmt_string.to_sv()};
 
   auto reader  = MessageReader{data};
   auto message = std::format(fmt, deserialize<Args>(reader)...);
-  return Message{.text = message, .location = loc};
-  // return std::format("{}({}:{}) `{}`: {}", loc.file, loc.line, loc.column, loc.function, message);
+  return Message{.meta = meta, .text = message, .location = loc};
 }
 
 template <typename... Args>

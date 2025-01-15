@@ -6,7 +6,7 @@
 
 namespace slo::transport {
 struct MessageQueue {
-  void send(std::span<char> message) {
+  void send(std::span<char const> message) {
     std::scoped_lock lock{m};
     queue.emplace(message.begin(), message.end());
     c.notify_one();

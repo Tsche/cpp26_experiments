@@ -23,7 +23,7 @@ concept Serializer = requires(T obj) {
 
 template <typename T>
 concept Deserializer = requires(T obj) {
-    { obj.get_n(1) } -> std::same_as<std::span<char>>;
+    { obj.get_n(1) } -> std::same_as<std::span<char const>>;
 };
 
 template <typename T>

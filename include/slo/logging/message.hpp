@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <ctime>
+#include <slo/threading/info.hpp>
 
 namespace slo::logging {
 struct Location {
@@ -10,9 +12,24 @@ struct Location {
   std::uint32_t column{};
 };
 
+enum Severity : std::uint8_t {
+  DEBUG,
+  INFO,
+  WARNING,
+  ERROR,
+  FATAL
+};
+
+struct Prelude {
+  Severity severity;
+  std::time_t timestamp;
+  ThreadInfo thread;
+  std::uintptr_t formatter;
+};
+
 struct Message {
+  Prelude meta;
   std::string text;
-  Location location{};
-  std::uint64_t thread{};
+  Location location;
 };
 }  // namespace slo::logging
