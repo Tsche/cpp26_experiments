@@ -7,9 +7,9 @@
 
 #include <experimental/meta>
 
-#include <slo/message.hpp>
-#include <slo/message/buffered.hpp>
-#include <slo/network/transport/queue.hpp>
+#include <slo/net/message.hpp>
+#include <slo/net/message/buffered.hpp>
+#include <slo/net/transport/queue.hpp>
 #include <slo/util/fixed_string.hpp>
 
 #include "message.hpp"
@@ -29,13 +29,13 @@ Message format(std::span<char const> data, Prelude meta) {
 }
 
 template <typename... Args>
-struct Formatter {
+struct FormatString {
   formatter_type format{};
 
   template <typename Tp>
     requires std::convertible_to<Tp const&, std::string_view>
   consteval explicit(false)
-      Formatter(Tp const& str, std::source_location const location = std::source_location::current()) {
+      FormatString(Tp const& str, std::source_location const location = std::source_location::current()) {
     auto fmt = util::fixed_string{str};
 
     auto loc = logging::Location{.file     = location.file_name(),
@@ -51,5 +51,5 @@ struct Formatter {
 }  // namespace impl
 
 template <typename... Args>
-using Formatter = impl::Formatter<std::type_identity_t<Args>...>;
+using FormatString = impl::FormatString<std::type_identity_t<Args>...>;
 }  // namespace slo::logging

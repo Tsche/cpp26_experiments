@@ -1,4 +1,3 @@
-#include <cstdint>
 #include <slo/threading/info.hpp>
 #include <pthread.h>
 

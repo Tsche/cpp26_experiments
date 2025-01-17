@@ -24,7 +24,6 @@ struct Prelude {
   Severity severity;
   std::time_t timestamp;
   ThreadInfo thread;
-  std::uintptr_t formatter;
 };
 
 struct Message {

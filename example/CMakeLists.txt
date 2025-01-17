@@ -7,3 +7,6 @@ project(slo)
 target_compile_options(experiments PUBLIC "-O3")
 add_executable(logging "logging.cpp")
 target_link_libraries(logging PRIVATE experiments)
+
+add_executable(args "args.cpp")
+target_link_libraries(args PRIVATE experiments)

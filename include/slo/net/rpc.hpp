@@ -4,12 +4,12 @@
 #include <vector>
 #include <concepts>
 
-#include "../message.hpp"
-#include "../reflect.hpp"
-#include "../util/meta.hpp"
-#include "../util/stamp.hpp"
+#include <slo/reflect.hpp>
+#include <slo/net/message.hpp>
+#include <slo/util/meta.hpp>
+#include <slo/util/stamp.hpp>
 
-namespace rpc {
+namespace slo::rpc {
 namespace impl {
 template <std::meta::info Meta, int, typename, typename = [:type_of(Meta):]>
 struct CallProxy;
@@ -28,7 +28,6 @@ struct CallProxy<Meta, Idx, Super, R(Args...)> {
     requires(!std::same_as<Super, void>)  // only available if proxy is bound
   {
     // move along, nothing to see here
-
     // get a pointer to Proxy superobject from this subobject
     constexpr static auto member = meta::nth_nsdm<Super>(Idx + 1);
     Super* that                  = reinterpret_cast<Super*>(std::uintptr_t(this) - offset_of(member).bytes);

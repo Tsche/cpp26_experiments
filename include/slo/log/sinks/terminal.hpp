@@ -1,9 +1,9 @@
 #pragma once
-#include <cstdint>
-#include <slo/threading/info.hpp>
-#include "sink.hpp"
 #include <print>
 #include <filesystem>
+#include <slo/threading/info.hpp>
+
+#include "sink.hpp"
 
 #define RESET   "\033[0m"
 #define BLACK   "\033[30m"
@@ -18,11 +18,10 @@
 
 namespace slo::logging {
 struct Terminal : Sink {
-  explicit Terminal(bool colored_ = false) : colored(colored_) {}
   ~Terminal() override = default;
 
   static constexpr std::string_view fmt =
-      "[{}][" GREEN "{}" RESET "][" BLUE "{}" RESET "][" GREEN "{}({}:{})" RESET "]: {}\n";
+      "[{}][" GREEN "{}" RESET "][" BLUE "{}" RESET "][" GREEN "{}:{}:{}" RESET "]: {}\n";
 
   void print(Message const& message) override {
     auto thread_name = message.meta.thread.get_name();
@@ -30,12 +29,9 @@ struct Terminal : Sink {
       thread_name = "Unnamed";
     }
     auto file_name = std::filesystem::path(message.location.file).filename().string();
-
-    std::print(fmt, message.meta.timestamp, thread_name, message.location.function, file_name,
-               message.location.line, message.location.column, message.text);
+    // auto file_name = message.location.file;
+    std::print(fmt, message.meta.timestamp, thread_name, message.location.function, file_name, message.location.line,
+               message.location.column, message.text);
   }
-
-private:
-  bool colored;
 };
 }  // namespace slo::logging

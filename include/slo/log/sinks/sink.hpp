@@ -1,5 +1,5 @@
 #pragma once
-#include <slo/logging/message.hpp>
+#include <slo/log/message.hpp>
 
 namespace slo::logging {
   struct Sink{

@@ -8,13 +8,13 @@
 #include <ctime>
 
 #include <slo/reflect.hpp>
-#include <slo/message.hpp>
-#include <slo/message/buffered.hpp>
-#include <slo/network/transport/queue.hpp>
+#include <slo/net/message.hpp>
+#include <slo/net/message/buffered.hpp>
+#include <slo/net/transport/queue.hpp>
 #include <slo/threading/info.hpp>
 
 #include "message.hpp"
-#include "formatter.hpp"
+#include "format.hpp"
 #include "sinks/sink.hpp"
 
 namespace slo::logging {
@@ -76,9 +76,9 @@ void emit_message(Severity severity, formatter_type formatter, Args&&... args) {
   auto message = MessageWriter<message::HybridBuffer<>>{};
   auto prelude = Prelude{.severity = severity,
                          .timestamp = std::time({}), 
-                         .thread = slo::this_thread,
-                         .formatter = std::uintptr_t(formatter), };
+                         .thread = slo::this_thread};
   serialize(prelude, message);
+  serialize(std::uintptr_t(formatter), message);
   (serialize(std::forward<Args>(args), message), ...);
   Logger::send(message.finalize());
 }
@@ -86,7 +86,8 @@ void emit_message(Severity severity, formatter_type formatter, Args&&... args) {
 inline Message parse_message(std::span<char const> data) {
   auto reader  = MessageReader{data};
   auto prelude = deserialize<Prelude>(reader);
-  auto fnc     = reinterpret_cast<formatter_type>(prelude.formatter);
+  auto fnc_ptr = deserialize<std::uintptr_t>(reader);
+  auto fnc     = reinterpret_cast<formatter_type>(fnc_ptr);
   return fnc(data.subspan(reader.cursor), prelude);
 }
 }  // namespace slo::logging
