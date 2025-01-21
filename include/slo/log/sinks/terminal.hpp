@@ -24,12 +24,12 @@ struct Terminal : Sink {
       "[{}][" GREEN "{}" RESET "][" BLUE "{}" RESET "][" GREEN "{}:{}:{}" RESET "]: {}\n";
 
   void print(Message const& message) override {
-    auto thread_name = message.meta.thread.get_name();
-    if (thread_name.empty()) {
-      thread_name = "Unnamed";
-    }
-    auto file_name = std::filesystem::path(message.location.file).filename().string();
-    // auto file_name = message.location.file;
+    auto thread_name = "foo"; //message.meta.thread.get_name();
+    // if (thread_name.empty()) {
+      // thread_name = "Unnamed";
+    // }
+    // auto file_name = std::filesystem::path(message.location.file).filename().string();
+    auto file_name = message.location.file;
     std::print(fmt, message.meta.timestamp, thread_name, message.location.function, file_name, message.location.line,
                message.location.column, message.text);
   }

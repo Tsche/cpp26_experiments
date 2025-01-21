@@ -4,9 +4,12 @@ project(slo)
 
 # add_executable(echo "echo.cpp")
 # target_link_libraries(echo PRIVATE experiments)
-target_compile_options(experiments PUBLIC "-O3")
-add_executable(logging "logging.cpp")
-target_link_libraries(logging PRIVATE experiments)
 
-add_executable(args "args.cpp")
-target_link_libraries(args PRIVATE experiments)
+function(DEFINE_EXAMPLE TARGET)
+  add_executable(${TARGET} "${TARGET}.cpp")
+  target_link_libraries(${TARGET} PRIVATE experiments)
+endfunction()
+
+define_example(logging)
+define_example(args)
+define_example(rpc)

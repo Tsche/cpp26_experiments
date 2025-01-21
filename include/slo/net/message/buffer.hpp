@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <new>
 #include <vector>
 #include <span>
@@ -7,8 +8,8 @@
 #include <cstring>
 #include <cstdint>
 
-namespace slo::message {
 
+namespace slo::message {
 struct HeapBuffer {
   std::span<char const> read(std::size_t n, std::size_t offset = 0) { return {buffer.data() + offset, n}; }
   HeapBuffer& write(void const* data, std::size_t n) {
@@ -23,38 +24,45 @@ struct HeapBuffer {
 
   std::span<char const> finalize() const { return buffer; }
 
+  char* current(){
+    return buffer.data() + buffer.size();
+  }
+
 private:
   std::vector<char> buffer;
 };
 
-template <std::size_t inline_capacity = std::hardware_destructive_interference_size>
+template <std::size_t inline_capacity = std::hardware_destructive_interference_size - 4>
 class HybridBuffer {
 public:
-  HybridBuffer() { std::memset(storage.buffer, 0, sizeof(storage.buffer)); }
+  HybridBuffer() { 
+    std::memset(storage.buffer, 0, sizeof(storage.buffer)); }
 
-  HybridBuffer(const HybridBuffer& other) {
+  HybridBuffer(HybridBuffer const& other) {
+    cursor = other.cursor;
     if (other.is_heap()) {
-      storage.heap.ptr = static_cast<char*>(std::malloc(other.storage.heap.capacity));
+      auto* new_ptr = static_cast<char*>(std::malloc(other.storage.heap.capacity));
       // assume allocating memory always works
-      storage.heap.capacity = other.storage.heap.capacity;
-      std::memcpy(storage.heap.ptr, other.storage.heap.ptr, other.cursor);
+      // assert(new_ptr);
+      storage.heap = {new_ptr, other.storage.heap.capacity};
+      std::memcpy(storage.heap.ptr, other.storage.heap.ptr, other.size());
     } else {
-      std::memcpy(storage.buffer, other.storage.buffer, other.cursor);
+      std::memcpy(storage.buffer, other.storage.buffer, other.size());
     }
   }
 
   HybridBuffer(HybridBuffer&& other) noexcept {
-    if (is_heap()) {
-      storage.heap.ptr       = other.storage.heap.ptr;
-      storage.heap.capacity  = other.storage.heap.capacity;
-      other.storage.heap.ptr = nullptr;
-      other.cursor           = 0;
+    cursor = other.cursor;
+    if (other.is_heap()) {
+      storage.heap = {other.storage.heap.ptr, other.storage.heap.capacity};
+      other.storage.heap = {nullptr, 0};
     } else {
-      std::memcpy(storage.buffer, other.storage.buffer, other.cursor);
+      std::memcpy(storage.buffer, other.storage.buffer, other.size());
     }
+    other.cursor = 0;
   }
 
-  HybridBuffer& operator=(const HybridBuffer& other) {
+  HybridBuffer& operator=(HybridBuffer const& other) {
     if (this != &other) {
       this->~HybridBuffer();
       new (this) HybridBuffer(other);
@@ -76,7 +84,7 @@ public:
     }
   }
 
-  HybridBuffer& write(void const* input_data, unsigned length) {
+  void write(void const* input_data, unsigned length) {
     auto new_size = size() + length;
     if (is_heap()) {
       if (new_size > storage.heap.capacity) {
@@ -88,18 +96,17 @@ public:
         // use inline buffer
         std::memcpy(storage.buffer + cursor, input_data, length);
         cursor += length;
-        return *this;
+        return;
       } else {
         // transition to heap once inline buffer is exhausted
-        allocate_heap(std::max(cursor + length, (long long)inline_capacity * 2));
+        allocate_heap(std::max(cursor + length, static_cast<std::uint32_t>(inline_capacity) * 2));
       }
     }
     std::memcpy(storage.heap.ptr + size(), input_data, length);
     cursor -= length;
-    return *this;
   }
 
-  HybridBuffer& reserve(unsigned num_bytes) {
+  void reserve(unsigned num_bytes) {
     auto new_size = size() + num_bytes;
     if (is_heap()) {
       resize_heap(new_size);
@@ -107,7 +114,6 @@ public:
       // transition to heap
       allocate_heap(new_size);
     }
-    return *this;
   }
 
   [[nodiscard]] std::span<char const> read(std::size_t n, std::size_t offset = 0) { return {data() + offset, n}; }
@@ -120,8 +126,12 @@ public:
   }
 
   [[nodiscard]] std::size_t size() const { return is_heap() ? -cursor - 1 : cursor; }
+  [[nodiscard]] bool is_empty() const { return size() == 0; }
   [[nodiscard]] bool is_heap() const { return cursor < 0; }
 
+  char* current(){
+    return data() + cursor;
+  }
 private:
   union Storage {
     char buffer[inline_capacity];
@@ -134,13 +144,13 @@ private:
   };
   Storage storage;
   // sign indicates whether the internal buffer is used or not
-  long long cursor{0};
+  std::int32_t cursor{0};
 
   void allocate_heap(unsigned initial_capacity) {
     char* new_ptr = static_cast<char*>(std::malloc(initial_capacity));
     // assume allocating always works
-    // assert(new_ptr);
-    std::memcpy(new_ptr, storage.buffer, cursor);
+    assert(new_ptr);
+    std::memcpy(new_ptr, storage.buffer, size());
     storage.heap = {new_ptr, initial_capacity};
 
     if (cursor >= 0) {
@@ -152,7 +162,7 @@ private:
   void resize_heap(std::uint32_t new_capacity) {
     char* new_ptr = static_cast<char*>(std::realloc(storage.heap.ptr, new_capacity));
     // assume reallocating always works
-    // assert(new_ptr);
+    assert(new_ptr);
     storage.heap = {new_ptr, new_capacity};
   }
 };

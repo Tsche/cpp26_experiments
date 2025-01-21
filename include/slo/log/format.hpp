@@ -7,12 +7,11 @@
 
 #include <experimental/meta>
 
-#include <slo/net/message.hpp>
-#include <slo/net/message/buffered.hpp>
-#include <slo/net/transport/queue.hpp>
+#include <slo/net/message/buffer.hpp>
 #include <slo/util/fixed_string.hpp>
 
 #include "message.hpp"
+#include <slo/net/message/reader.hpp>
 
 namespace slo::logging {
 using formatter_type = Message (*)(std::span<char const>, Prelude);
@@ -21,10 +20,12 @@ namespace impl {
 
 template <util::fixed_string fmt_string, Location loc, typename... Args>
 Message format(std::span<char const> data, Prelude meta) {
-  auto fmt = std::format_string<Args...>{fmt_string.to_sv()};
+  // auto fmt = std::format_string<Args...>{fmt_string.to_sv()};
 
-  auto reader  = MessageReader{data};
-  auto message = std::format(fmt, deserialize<Args>(reader)...);
+  auto reader  = message::MessageView{data};
+  auto message = 
+  std::string{fmt_string.to_sv()}; 
+  // std::format(fmt, deserialize<Args>(reader)...);
   return Message{.meta = meta, .text = message, .location = loc};
 }
 

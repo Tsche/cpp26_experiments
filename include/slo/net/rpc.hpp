@@ -5,9 +5,11 @@
 #include <concepts>
 
 #include <slo/reflect.hpp>
-#include <slo/net/message.hpp>
 #include <slo/util/meta.hpp>
 #include <slo/util/stamp.hpp>
+#include <slo/net/message/buffer.hpp>
+
+#include "rpc/protocol.hpp"
 
 namespace slo::rpc {
 namespace impl {
@@ -21,7 +23,7 @@ struct CallProxy<Meta, Idx, Super, R(Args...)> {
 
   template <typename Obj>
   static constexpr R eval(Obj&& obj, Deserializer auto& args) {
-    return (std::forward<Obj>(obj).[:Meta:])(args.template get<Args>()...);
+    return (std::forward<Obj>(obj).[:Meta:])(deserialize<Args>(args)...);
   }
 
   decltype(auto) operator()(Args... args) const
@@ -33,11 +35,16 @@ struct CallProxy<Meta, Idx, Super, R(Args...)> {
     Super* that                  = reinterpret_cast<Super*>(std::uintptr_t(this) - offset_of(member).bytes);
 
     // first (unnamed) member of Proxy is a pointer to the actual handler
-    using protocol = [:remove_pointer(type_of(meta::nth_nsdm<Super>(0))):];
-    auto request = protocol::template make_request<CallProxy>(args...);
-    auto* handler = that->[:meta::nth_nsdm<Super>(0):];
+    // using protocol = [:remove_pointer(type_of(meta::nth_nsdm<Super>(0))):];
+    // auto request = protocol::template make_request<CallProxy>(args...);
+    
+    message::HybridBuffer<> buffer{};
+    (serialize(args, buffer), ...);
+    auto prelude = rpc::Prelude{.endpoint=0, .function=Idx, 
+                                .size=static_cast<std::uint32_t>(buffer.size())};
 
-    return handler->template call<R>(request);
+    auto* handler = that->[:meta::nth_nsdm<Super>(0):];
+    return handler->template call<R>(prelude, buffer);
   }
 
   template <typename Obj>

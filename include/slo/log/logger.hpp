@@ -8,37 +8,46 @@
 #include <ctime>
 
 #include <slo/reflect.hpp>
-#include <slo/net/message.hpp>
-#include <slo/net/message/buffered.hpp>
-#include <slo/net/transport/queue.hpp>
+#include <slo/net/message/buffer.hpp>
 #include <slo/threading/info.hpp>
+#include <slo/queue/basic.hpp>
 
 #include "message.hpp"
 #include "format.hpp"
 #include "sinks/sink.hpp"
+#include "slo/queue/mpmc_bounded.hpp"
+#include "slo/queue/spsc_bounded.hpp"
 
 namespace slo::logging {
 
 Message parse_message(std::span<char const>);
 struct Logger {
+  using message_type = message::HybridBuffer<64-12>;
+
   static auto& message_queue() {
-    static transport::MessageQueue queue{};
+    // static queues::BoundedSPSC<message_type, 64> queue{};
+    static queues::BoundedMPMC<message_type, 64> queue{};
+    // static BasicQueue<message_type> queue{};
     return queue;
   }
 
-  static void send(std::span<char const> message) { message_queue().send(message); }
+  template <typename U>
+  static void send(U&& message) {
+    message_queue().push(std::forward<U>(message));
+  }
+
   void run() {
     slo::this_thread.set_name("logger");
     auto token = stop_source.get_token();
-    std::stop_callback on_stop{token, []() { message_queue().notify_all(); }};
+    // std::stop_callback on_stop{token, []() { message_queue().notify_all(); }};
 
     while (true) {
-      auto msg = message_queue().receive(token);
-      if (msg.empty()) {
+      auto msg = message_queue().pop(token);
+      if (msg.is_empty()) {
         break;
       }
 
-      dispatch(parse_message(msg));
+      dispatch(parse_message(msg.finalize()));
     }
   }
 
@@ -73,18 +82,16 @@ private:
 
 template <typename... Args>
 void emit_message(Severity severity, formatter_type formatter, Args&&... args) {
-  auto message = MessageWriter<message::HybridBuffer<>>{};
-  auto prelude = Prelude{.severity = severity,
-                         .timestamp = std::time({}), 
-                         .thread = slo::this_thread};
+  auto message = Logger::message_type{};
+  auto prelude = Prelude{.severity = severity, .timestamp = std::time({}), .thread = slo::this_thread};
   serialize(prelude, message);
   serialize(std::uintptr_t(formatter), message);
   (serialize(std::forward<Args>(args), message), ...);
-  Logger::send(message.finalize());
+  Logger::send(message);
 }
 
 inline Message parse_message(std::span<char const> data) {
-  auto reader  = MessageReader{data};
+  auto reader  = message::MessageView{data};
   auto prelude = deserialize<Prelude>(reader);
   auto fnc_ptr = deserialize<std::uintptr_t>(reader);
   auto fnc     = reinterpret_cast<formatter_type>(fnc_ptr);

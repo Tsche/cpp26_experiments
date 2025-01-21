@@ -17,13 +17,13 @@ namespace slo {
 
 template <typename T>
 concept Serializer = requires(T obj) {
-    { obj.write_n(nullptr, 1) } -> std::same_as<void>;
+    { obj.write(nullptr, 1) } -> std::same_as<void>;
     { obj.reserve(1) } -> std::same_as<void>;
 };
 
 template <typename T>
 concept Deserializer = requires(T obj) {
-    { obj.get_n(1) } -> std::same_as<std::span<char const>>;
+    { obj.read(1) } -> std::same_as<std::span<char const>>;
 };
 
 template <typename T>
@@ -47,13 +47,13 @@ struct Reflect<T> {
         if constexpr (std::endian::native == std::endian::big) {
             arg = std::byteswap(arg);
         }
-        buffer.write_n(&arg, sizeof(arg));
+        buffer.write(&arg, sizeof(arg));
     }
 
     static T deserialize(Deserializer auto& buffer) {
         std::remove_const_t<T> value;
 
-        auto raw = buffer.get_n(sizeof(T));
+        auto raw = buffer.read(sizeof(T));
         std::memcpy(&value, raw.data(), sizeof(T));
 
         if constexpr (std::endian::native == std::endian::big) {
