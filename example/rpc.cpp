@@ -1,5 +1,5 @@
-// #include <slo/net/tcp.hpp>
-// #include <slo/net/rpc.hpp>
+// #include <erl/net/tcp.hpp>
+// #include <erl/net/rpc.hpp>
 
 // template <typename Server>
 // struct ConnectionManager : Server {
@@ -7,11 +7,11 @@
 
 //   }
 // private:
-//   std::vector<slo::tcp::Client> clients;
+//   std::vector<erl::tcp::Client> clients;
 // };
 
 
-// struct TestService : slo::rpc::Service {
+// struct TestService : erl::rpc::Service {
 //   int echo(int num) { return num; }
 // };
 
@@ -20,15 +20,15 @@
 //   static constexpr int port = 4206;
 //   if (pid > 0){
 //     auto service = TestService{};
-//     auto server = slo::tcp::Server();
+//     auto server = erl::tcp::Server();
 //     server.listen(port, 1);
 //     auto client = server.accept();
 
 //   } else {
-//     auto client = slo::tcp::Client();
+//     auto client = erl::tcp::Client();
 //     client.connect("127.0.0.1", port);
 
-//     auto remote = slo::rpc::make_proxy<TestService>(client);
+//     auto remote = erl::rpc::make_proxy<TestService>(client);
 //   }
 // }
 
@@ -82,9 +82,9 @@ template <typename T> void bench(int cpu1, int cpu2) {
             << " msg/s" << std::endl;
 }
 
-#include <slo/queue/mpmc_bounded.hpp>
-#include <slo/queue/spsc_bounded.hpp>
-#include <slo/queue/basic.hpp>
+#include <erl/queue/mpmc_bounded.hpp>
+#include <erl/queue/spsc_bounded.hpp>
+#include <erl/queue/basic.hpp>
 
 int main(int argc, char *argv[]) {
   int strategy = -1;
@@ -101,13 +101,13 @@ int main(int argc, char *argv[]) {
 
   switch(strategy){
     case 0:
-    bench<slo::BasicQueue<int>>(cpu1, cpu2);
+    bench<erl::BasicQueue<int>>(cpu1, cpu2);
     break;
     case 1: 
-    bench<slo::queues::BoundedSPSC<int, 64>>(cpu1, cpu2);
+    bench<erl::queues::BoundedSPSC<int, 64>>(cpu1, cpu2);
     break;
     case 2: 
-    bench<slo::queues::BoundedMPMC<int, 64>>(cpu1, cpu2);
+    bench<erl::queues::BoundedMPMC<int, 64>>(cpu1, cpu2);
     break;
   }
   

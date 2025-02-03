@@ -6,9 +6,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <slo/net/transport/tcp.hpp>
+#include <erl/net/transport/tcp.hpp>
 
-namespace slo::tcp {
+namespace erl::tcp {
 Socket::Socket() : handle(-1) {}
 Socket::~Socket() {
   if (handle > 0) {

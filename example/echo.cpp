@@ -1,6 +1,6 @@
 #include <cstdio>
-#include <slo/rpc/rpc.hpp>
-#include "slo/message.hpp"
+#include <erl/rpc/rpc.hpp>
+#include <erl/message.hpp>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
