@@ -12,6 +12,9 @@ struct Socket {
   Socket();
   ~Socket();
   explicit Socket(native_handle handle) : handle(handle) {}
+  Socket(Socket&) = delete;
+  Socket& operator=(Socket&) = delete;
+
   [[nodiscard]] bool is_valid() const;
 
   explicit(false) operator bool(){ return is_valid(); }

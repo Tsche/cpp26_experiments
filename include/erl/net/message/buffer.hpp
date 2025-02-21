@@ -23,6 +23,7 @@ struct HeapBuffer {
   }
 
   std::span<char const> finalize() const { return buffer; }
+  [[nodiscard]] explicit operator std::span<char const>() const { return buffer; }
 
   char* current(){
     return buffer.data() + buffer.size();
@@ -118,7 +119,8 @@ public:
 
   [[nodiscard]] std::span<char const> read(std::size_t n, std::size_t offset = 0) { return {data() + offset, n}; }
 
-  [[nodiscard]] std::span<char const> finalize() const { return std::span(data(), size()); }
+  [[nodiscard]] std::span<char const> finalize() const { return {data(), size()}; }
+  [[nodiscard]] explicit operator std::span<char const>() const { return {data(), size()}; }
 
   [[nodiscard]] char const* data() const {
     return is_heap() ? static_cast<char const*>(storage.heap.ptr)
@@ -134,7 +136,7 @@ public:
   }
 private:
   union Storage {
-    char buffer[inline_capacity];
+    char buffer[inline_capacity]{};
     struct HeapBuffer {
       char* ptr              = nullptr;
       std::uint32_t capacity = 0;

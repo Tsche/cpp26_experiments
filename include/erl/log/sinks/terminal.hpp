@@ -1,37 +1,63 @@
 #pragma once
+#include <cstdio>
+#include <format>
 #include <print>
 #include <filesystem>
-#include <erl/threading/info.hpp>
+#include <erl/thread.hpp>
+
+#include <erl/log/message.hpp>
+#include <erl/log/format/log.hpp>
+#include <erl/log/format/color.hpp>
 
 #include "sink.hpp"
 
-#define RESET   "\033[0m"
-#define BLACK   "\033[30m"
-#define RED     "\033[31m"
-#define GREEN   "\033[32m"
-#define YELLOW  "\033[33m"
-#define BLUE    "\033[34m"
-#define MAGENTA "\033[35m"
-#define CYAN    "\033[36m"
-#define WHITE   "\033[37m"
-#define BOLD    "\033[1m"
-
 namespace erl::logging {
 struct Terminal : Sink {
-  ~Terminal() override = default;
+  LogFormat formatter;
+  Severity minimum_severity;
+  std::unordered_map<Severity, std::string_view> color_map;
 
-  static constexpr std::string_view fmt =
-      "[{}][" GREEN "{}" RESET "][" BLUE "{}" RESET "][" GREEN "{}:{}:{}" RESET "]: {}\n";
+  ~Terminal() override = default;
+  explicit Terminal(LogFormat formatter,
+                    Severity min_severity = Severity::DEBUG,
+                    std::unordered_map<Severity, std::string_view> color_map = {})
+      : formatter(formatter)
+      , minimum_severity(min_severity)
+      , color_map(color_map) {}
+
+  void spawn(CachedThreadInfo const& thread) override {
+    print({.severity = Severity::DEBUG, .thread = thread, .text = std::format("thread {} started", thread.id)});
+  }
+
+  void exit(CachedThreadInfo const& thread) override {
+    print({.severity = Severity::DEBUG,
+           .thread   = thread,
+           .text     = std::format("thread {} `{}` exited", thread.id, thread.name)});
+  }
+
+  void rename(CachedThreadInfo const& info, std::string_view name) override {
+    print({.severity = Severity::DEBUG,
+           .thread   = info,
+           .text     = std::format("thread {} `{}` renamed to `{}`", info.id, info.name, name)});
+  }
+
+  void set_parent(CachedThreadInfo const& info, CachedThreadInfo const& parent) override {
+    print({.severity = Severity::DEBUG,
+           .thread   = info,
+           .text = std::format("thread {} `{}` parent set to {} `{}`", info.id, info.name, parent.id, parent.name)});
+  }
 
   void print(Message const& message) override {
-    auto thread_name = erl::thread::get_name(message.meta.thread.id);
-    // if (thread_name.empty()) {
-      // thread_name = "Unnamed";
-    // }
-    // auto file_name = std::filesystem::path(message.location.file).filename().string();
-    auto file_name = message.location.file;
-    std::print(fmt, message.meta.timestamp, thread_name, message.location.function, file_name, message.location.line,
-               message.location.column, message.text);
+    if (message.severity < minimum_severity) {
+      return;
+    }
+
+    std::string_view color = "";
+    if (auto it = color_map.find(message.severity); it != color_map.end()) {
+      color = it->second;
+    }
+
+    std::puts(formatter(message, color).c_str());
   }
 };
 }  // namespace erl::logging

@@ -24,7 +24,7 @@ void error(logging::FormatString<Args...> fmt, Args&&... args) {
 }
 
 template <typename... Args>
-void fatal_error(logging::FormatString<Args...> fmt, Args&&... args) {
+void fatal(logging::FormatString<Args...> fmt, Args&&... args) {
   logging::emit_message(logging::FATAL, fmt.format, std::forward<Args>(args)...);
 }
 }

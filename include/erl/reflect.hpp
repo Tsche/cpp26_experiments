@@ -37,7 +37,7 @@ void serialize(T&& obj, Serializer auto& buffer) {
 }
 
 template <typename T>
-std::remove_cvref_t<T> deserialize(Deserializer auto& buffer) {
+auto deserialize(Deserializer auto& buffer) {
     return Reflect<std::remove_cvref_t<T>>::deserialize(buffer);
 }
 
@@ -99,7 +99,9 @@ template <typename T>
   requires std::is_enum_v<T>
 struct Reflect<T> {
   static void serialize(auto&& arg, Serializer auto& target) {
-    erl::serialize<std::underlying_type_t<T>>(std::forward<decltype(arg)>(arg), target);
+    erl::serialize<std::underlying_type_t<T>>(
+      static_cast<std::underlying_type_t<T>>(std::forward<decltype(arg)>(arg)), 
+      target);
   }
 
   static T deserialize(Deserializer auto& buffer) { 
@@ -162,7 +164,7 @@ struct Reflect<T> {
     hasher(display_string_of(^^T));
     // TODO hash bases
     [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-      (Reflect<[:remove_cvref(type_of(meta::nth_nsdm<T>(Idx))):]>::hash_append(hasher), ...);
+      (Reflect<[:remove_cvref(type_of(meta::get_nth_member(^^T, Idx))):]>::hash_append(hasher), ...);
     }(std::make_index_sequence<nonstatic_data_members_of(^^T).size()>{});
   }
 };
@@ -187,7 +189,7 @@ struct Reflect<T> {
     for (std::uint32_t idx = 0; idx < size; ++idx) {
       elements.push_back(erl::deserialize<element_type>(buffer));
     }
-    if constexpr (is_template(^^T) && template_of(^^T) == ^^std::basic_string_view) {
+    if constexpr (std::same_as<T, std::string_view>) {
       // cannot serialize to non-owning view, produce string instead
       return std::string(begin(elements), end(elements));
     } else {

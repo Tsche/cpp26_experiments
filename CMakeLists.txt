@@ -8,13 +8,14 @@ set(CMAKE_CXX_STANDARD 26)
 
 add_library(erl SHARED "")
 target_compile_options(erl PUBLIC 
+  "-fexperimental-library"
   "-stdlib=libc++" 
   "-freflection" 
   "-fannotation-attributes" 
   "-ftime-trace" 
   "-O3"
 )
-target_link_options(erl PUBLIC "-stdlib=libc++" "-lc++abi")
+target_link_options(erl PUBLIC "-fexperimental-library" "-stdlib=libc++" "-lc++abi")
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)

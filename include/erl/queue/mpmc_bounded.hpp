@@ -46,7 +46,7 @@ struct BoundedMPMC : impl::QueueBase {
       }
     }
 
-    new (&cell->data) T(std::move(data));
+    new (&cell->data) T(std::forward<U>(data));
     cell->sequence.store(pos + 1, std::memory_order_release);
 
     return true;

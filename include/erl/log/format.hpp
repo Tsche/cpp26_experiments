@@ -8,25 +8,29 @@
 #include <experimental/meta>
 
 #include <erl/net/message/buffer.hpp>
-#include <erl/util/fixed_string.hpp>
+#include <erl/util/string.hpp>
 
 #include "message.hpp"
 #include <erl/net/message/reader.hpp>
 
 namespace erl::logging {
-using formatter_type = Message (*)(std::span<char const>, Prelude);
+namespace impl {
+  struct FormattingResult {
+    Location location;
+    std::string text;
+  };
+}
+
+using formatter_type = impl::FormattingResult (*)(std::span<char const>);
 
 namespace impl {
 
 template <util::fixed_string fmt_string, Location loc, typename... Args>
-Message format(std::span<char const> data, Prelude meta) {
-  // auto fmt = std::format_string<Args...>{fmt_string.to_sv()};
+impl::FormattingResult format(std::span<char const> data) {
+  auto fmt = std::format_string<Args...>{fmt_string};
 
   auto reader  = message::MessageView{data};
-  auto message = 
-  std::string{fmt_string.to_sv()}; 
-  // std::format(fmt, deserialize<Args>(reader)...);
-  return Message{.meta = meta, .text = message, .location = loc};
+  return {.location = loc, .text=std::format(fmt, deserialize<Args>(reader)...)};
 }
 
 template <typename... Args>

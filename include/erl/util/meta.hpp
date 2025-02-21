@@ -1,46 +1,123 @@
 #pragma once
-#include <experimental/meta>
 #include <functional>
 #include <vector>
 #include <ranges>
 
+#include <experimental/meta>
+
+#include "string.hpp"
 
 namespace erl::meta {
 consteval auto member_functions_of(std::meta::info reflection) {
   return members_of(reflection) | std::views::filter(std::meta::is_public) |
          std::views::filter(std::meta::is_function) |
-         std::views::filter(
-             std::not_fn(std::meta::is_special_member_function)) |
+         std::views::filter(std::not_fn(std::meta::is_special_member_function)) |
          std::views::filter(std::not_fn(std::meta::is_conversion_function)) |
          std::views::filter(std::not_fn(std::meta::is_operator_function)) |
-         std::views::filter(std::not_fn(std::meta::is_static_member)) |
+         std::views::filter(std::not_fn(std::meta::is_static_member)) | std::ranges::to<std::vector>();
+}
+
+template <typename T>
+consteval auto nth_nsdm(std::size_t index) {
+  return nonstatic_data_members_of(^^T)[index];
+}
+
+consteval std::meta::info get_nth_member(std::meta::info reflection, std::size_t n) {
+  return nonstatic_data_members_of(reflection)[n];
+}
+
+template <typename T>
+consteval std::size_t get_member_index(std::string_view name) {
+  std::vector<std::string_view> names =
+      nonstatic_data_members_of(^^T) | std::views::transform(std::meta::identifier_of) | std::ranges::to<std::vector>();
+  if (auto it = std::ranges::find(names, name); it != names.end()) {
+    return std::distance(names.begin(), it);
+  }
+  return -1UZ;
+}
+
+template <typename T>
+consteval bool has_member(std::string_view name) {
+  return get_member_index<T>(name) != -1ULL;
+}
+
+template <typename T>
+consteval std::vector<std::string_view> get_member_names() {
+  return nonstatic_data_members_of(^^T) | std::views::transform(std::meta::identifier_of) |
          std::ranges::to<std::vector>();
 }
 
 template <typename T>
-consteval auto nth_nsdm(std::size_t index){
-  return nonstatic_data_members_of(^^T)[index];
+constexpr inline std::size_t member_count = nonstatic_data_members_of(^^T).size();
+
+template <char... Vs>
+constexpr inline auto static_string = util::fixed_string<sizeof...(Vs)>{Vs...};
+
+template <typename T, T... Vs>
+constexpr inline T static_array[sizeof...(Vs)]{Vs...};
+
+consteval auto intern(std::string_view str) {
+  std::vector<std::meta::info> args;
+  for (auto character : str) {
+    args.push_back(std::meta::reflect_value(character));
+  }
+  return substitute(^^static_string, args);
 }
 
-namespace impl{
-  template <auto... Vs>
-  struct Replicator {
-    template <typename F>
-    constexpr decltype(auto) operator>>(F fnc) const {
-      return fnc.template operator()<Vs...>();
-    }
-  };
-
-  template <auto... Vs>
-  constexpr static Replicator<Vs...> replicator{};
+template <std::ranges::input_range R>
+  requires(!std::same_as<std::ranges::range_value_t<R>, char>)
+consteval auto intern(R&& iterable) {
+  std::vector args = {^^std::ranges::range_value_t<R>};
+  for (auto element : iterable) {
+    args.push_back(std::meta::reflect_value(element));
+  }
+  return substitute(^^static_array, args);
 }
+
+namespace impl {
+template <auto... Vs>
+struct Replicator {
+  template <typename F>
+  constexpr decltype(auto) operator>>(F fnc) const {
+    return fnc.template operator()<Vs...>();
+  }
+
+  template <typename F>
+  constexpr void operator>>=(F fnc) const {
+    (fnc.template operator()<Vs>(), ...);
+  }
+};
+
+template <auto... Vs>
+constexpr inline Replicator<Vs...> replicator{};
+}  // namespace impl
 
 template <std::ranges::range R>
-consteval auto expand(R range){
+consteval auto expand(R const& range) {
   std::vector<std::meta::info> args;
-  for (auto item : range){
-    args.push_back(reflect_value(item));
+  for (auto item : range) {
+    args.push_back(std::meta::reflect_value(item));
   }
   return substitute(^^impl::replicator, args);
 }
-} // namespace meta
+
+template <std::ranges::range R>
+consteval auto enumerate(R range) {
+  std::vector<std::meta::info> args;
+
+  // could also use std::views::enumerate(range)
+  for (auto idx = 0; auto item : range) {
+    args.push_back(std::meta::reflect_value(std::pair{idx++, item}));
+  }
+  return substitute(^^impl::replicator, args);
+}
+
+consteval auto sequence(unsigned maximum) {
+  return expand(std::ranges::iota_view{0U, maximum});
+}
+
+template <typename T>
+constexpr inline auto enumerator_names = [:expand(enumerators_of(^^T)):] >> []<std::meta::info... Enumerators> {
+  return std::array{std::string_view{identifier_of(Enumerators)}...};
+};
+}  // namespace erl::meta
