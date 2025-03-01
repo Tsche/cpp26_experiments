@@ -36,11 +36,12 @@ private:
 template <std::size_t inline_capacity = std::hardware_destructive_interference_size - 4>
 class HybridBuffer {
 public:
-  HybridBuffer() { 
-    std::memset(storage.buffer, 0, sizeof(storage.buffer)); }
+  // HybridBuffer() { 
+    // std::memset(storage.buffer, 0, sizeof(storage.buffer));
+  // }
+  HybridBuffer() = default;
 
-  HybridBuffer(HybridBuffer const& other) {
-    cursor = other.cursor;
+  HybridBuffer(HybridBuffer const& other) : cursor(other.cursor) {
     if (other.is_heap()) {
       auto* new_ptr = static_cast<char*>(std::malloc(other.storage.heap.capacity));
       // assume allocating memory always works
@@ -52,8 +53,7 @@ public:
     }
   }
 
-  HybridBuffer(HybridBuffer&& other) noexcept {
-    cursor = other.cursor;
+  HybridBuffer(HybridBuffer&& other) noexcept : cursor(other.cursor) {
     if (other.is_heap()) {
       storage.heap = {other.storage.heap.ptr, other.storage.heap.capacity};
       other.storage.heap = {nullptr, 0};

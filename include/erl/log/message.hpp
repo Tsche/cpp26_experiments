@@ -27,13 +27,24 @@ struct CachedThreadInfo {
 using timestamp_t = std::chrono::system_clock::time_point;
 
 enum Severity : std::uint8_t { DEBUG, INFO, WARNING, ERROR, FATAL };
+
+namespace impl {
+  struct FormattingResult {
+    Location location;
+    std::string text;
+  };
+}
+
+using formatter_type = impl::FormattingResult (*)(std::span<char const>);
+
 struct LoggingEvent {
   Severity severity;
   ThreadInfo thread;
   long long timestamp;
 
   // todo deserialize pointer to function
-  std::uintptr_t handler_ptr;
+  // std::uintptr_t handler_ptr;
+  formatter_type handler;
 };
 
 struct Message {

@@ -9,11 +9,12 @@ set(CMAKE_CXX_STANDARD 26)
 add_library(erl SHARED "")
 target_compile_options(erl PUBLIC 
   "-fexperimental-library"
-  "-stdlib=libc++" 
-  "-freflection" 
-  "-fannotation-attributes" 
-  "-ftime-trace" 
-  "-O3"
+  "-stdlib=libc++"
+  "-freflection"
+  "-fannotation-attributes"
+  "-fparameter-reflection"
+  "-ftime-trace"
+  "-O0"
 )
 target_link_options(erl PUBLIC "-fexperimental-library" "-stdlib=libc++" "-lc++abi")
 

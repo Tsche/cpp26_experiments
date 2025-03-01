@@ -17,6 +17,51 @@ consteval auto member_functions_of(std::meta::info reflection) {
          std::views::filter(std::not_fn(std::meta::is_static_member)) | std::ranges::to<std::vector>();
 }
 
+consteval auto named_members_of(std::meta::info reflection) {
+  return members_of(reflection) | std::views::filter(std::meta::has_identifier) | std::ranges::to<std::vector>();
+}
+
+consteval auto get_annotation(std::meta::info item, std::meta::info type) {
+  if (is_type(type)) {
+    return annotations_of(item, type)[0];
+  } else if (is_template(type)) {
+    for (auto annotation : annotations_of(item)) {
+      if (has_template_arguments(type_of(annotation)) && template_of(type_of(annotation)) == type) {
+        return annotation;
+      }
+    }
+  }
+  return ^^::;
+}
+
+template <typename T>
+consteval bool has_annotation(std::meta::info item) {
+  return !annotations_of(item, ^^T).empty();
+}
+
+consteval bool has_annotation(std::meta::info item, std::meta::info type) {
+  if (is_type(type)) {
+    return !annotations_of(item, type).empty();
+  } else if (is_template(type)) {
+    for (auto annotation : annotations_of(item)) {
+      if (has_template_arguments(type_of(annotation)) && template_of(type_of(annotation)) == type) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+template <typename T>
+consteval bool has_annotation(std::meta::info item, T const& value) {
+  if (!has_annotation<T>(item)) {
+    return false;
+  }
+  auto annotations = annotations_of(item, ^^T);
+  auto value_r     = std::meta::reflect_value(value);
+  return std::ranges::any_of(annotations, [&](auto annotation) { return annotation == value_r; });
+}
+
 template <typename T>
 consteval auto nth_nsdm(std::size_t index) {
   return nonstatic_data_members_of(^^T)[index];
@@ -53,9 +98,6 @@ constexpr inline std::size_t member_count = nonstatic_data_members_of(^^T).size(
 template <char... Vs>
 constexpr inline auto static_string = util::fixed_string<sizeof...(Vs)>{Vs...};
 
-template <typename T, T... Vs>
-constexpr inline T static_array[sizeof...(Vs)]{Vs...};
-
 consteval auto intern(std::string_view str) {
   std::vector<std::meta::info> args;
   for (auto character : str) {
@@ -64,6 +106,9 @@ consteval auto intern(std::string_view str) {
   return substitute(^^static_string, args);
 }
 
+template <typename T, T... Vs>
+constexpr inline T fixed_array[sizeof...(Vs)]{Vs...};
+
 template <std::ranges::input_range R>
   requires(!std::same_as<std::ranges::range_value_t<R>, char>)
 consteval auto intern(R&& iterable) {
@@ -71,7 +116,7 @@ consteval auto intern(R&& iterable) {
   for (auto element : iterable) {
     args.push_back(std::meta::reflect_value(element));
   }
-  return substitute(^^static_array, args);
+  return substitute(^^fixed_array, args);
 }
 
 namespace impl {

@@ -106,7 +106,7 @@ void emit_message(Severity severity, formatter_type formatter, Args&&... args) {
   auto event = LoggingEvent{.severity    = severity,
                             .thread      = erl::this_thread,
                             .timestamp   = timestamp,
-                            .handler_ptr = std::uintptr_t(formatter)};
+                            .handler     = formatter};
   serialize(event, message);
   (serialize(std::forward<Args>(args), message), ...);
   Logger::send(EventKind::LOGGING, message.finalize());

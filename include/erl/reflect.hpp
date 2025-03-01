@@ -226,6 +226,48 @@ struct Reflect<T[N]> {
   }
 };
 
+template <typename R, typename... Args>
+struct Reflect<R (*)(Args...)> {
+  using type = R(*)(Args...);
+
+  static void serialize(type arg, Serializer auto& target) {
+    auto value = std::uintptr_t(arg);
+    erl::serialize(value, target);
+  }
+
+  static type deserialize(Deserializer auto& buffer) {
+    auto value = erl::deserialize<std::uintptr_t>(buffer);
+    return reinterpret_cast<type>(value);
+  }
+
+  consteval static void hash_append(auto& hasher) {
+    hasher(display_string_of(^^R(*)(Args...)));
+    Reflect<std::remove_cvref_t<R>>::hash_append(hasher);
+    (Reflect<std::remove_cvref_t<Args>>::hash_append(hasher), ...);
+  }
+};
+
+template <typename T>
+  requires (!std::same_as<std::remove_const_t<T>, char>)
+struct Reflect<T*> {
+  using type = T*;
+
+  static void serialize(type arg, Serializer auto& target) {
+    auto value = std::uintptr_t(arg);
+    erl::serialize(value, target);
+  }
+
+  static type deserialize(Deserializer auto& buffer) {
+    auto value = erl::deserialize<std::uintptr_t>(buffer);
+    return reinterpret_cast<type>(value);
+  }
+
+  consteval static void hash_append(auto& hasher) {
+    hasher(display_string_of(^^T*));
+    Reflect<std::remove_const_t<T>>::hash_append(hasher);
+  }
+};
+
 template <typename T, typename Hasher = util::FNV1a>
 consteval auto hash_type(){
     auto hasher = Hasher{};

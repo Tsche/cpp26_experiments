@@ -37,8 +37,7 @@ void Logger::run() {
 
 void Logger::handle_message(message::MessageView& data) {
   auto prelude = deserialize<LoggingEvent>(data);
-  auto fnc     = reinterpret_cast<formatter_type>(prelude.handler_ptr);
-  auto [location, text] = fnc(data.buffer.subspan(data.cursor));
+  auto [location, text] = prelude.handler(data.buffer.subspan(data.cursor));
   auto timestamp = timestamp_t{std::chrono::system_clock::duration{prelude.timestamp}};
   auto message = Message{
     .severity = prelude.severity,

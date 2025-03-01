@@ -3,23 +3,38 @@
 #include <type_traits>
 #include <vector>
 #include <concepts>
-
+#include <ranges>
 #include <experimental/meta>
 
 #include <erl/reflect.hpp>
 #include <erl/util/meta.hpp>
 #include <erl/util/stamp.hpp>
 #include <erl/net/message/buffer.hpp>
-#include "erl/net/message/reader.hpp"
+#include <erl/net/message/reader.hpp>
+#include "dispatch.hpp"
 
 namespace erl::rpc {
-namespace impl {
+inline namespace annotations {
+struct Handler {
+  std::meta::info fnc;
+  friend bool operator==(Handler const& self, std::optional<Handler> const& other) {
+    if (!other.has_value()) {
+      return false;
+    }
+    return self.fnc == other->fnc;
+  }
+};
 
-template <std::meta::info Meta, int, typename, typename = [:type_of(Meta):]>
-struct CallProxy;
+consteval Handler handler(std::meta::info fnc) {
+  return {fnc};
+}
 
-template <std::meta::info Meta, int Idx, typename Super, typename R, typename... Args>
-struct CallProxy<Meta, Idx, Super, R(Args...)> {
+struct SkipTag {};
+constexpr inline SkipTag skip{};
+}  // namespace annotations
+
+template <int Idx, typename Super, typename R>
+struct FunctionProxy {
   template <typename... Ts>
   decltype(auto) operator()(Ts&&... args) const {
     // get a pointer to Proxy superobject from this subobject
@@ -28,127 +43,310 @@ struct CallProxy<Meta, Idx, Super, R(Args...)> {
 
     // first (unnamed) member of Proxy is a pointer to the actual handler
     auto* handler = that->[:meta::get_nth_member(^^Super, 0):];
-
     return handler->template call<R>(Idx, std::forward<Ts>(args)...);
   }
+};
 
-  static constexpr auto index = Idx;
-  using return_type           = R;
-
+template <std::meta::info Meta, int Idx, typename Protocol>
+struct FunctionDispatcher {
   template <typename Obj>
     requires(parent_of(Meta) == remove_cvref(^^Obj))
-  static constexpr R eval(Obj&& obj, Deserializer auto& args) {
-    return (std::forward<Obj>(obj).[:Meta:])(deserialize<Args>(args)...);
+  static constexpr decltype(auto) eval(Obj&& obj, std::span<char const> data) {
+    auto args = message::MessageView{data};
+    return [:meta::expand(parameters_of(Meta)):] >> [&]<auto... Params> {
+      return (std::forward<Obj>(obj).[:Meta:])(deserialize<[:type_of(Params):]>(args)...);
+    };
   }
 
   template <typename Obj>
-  static constexpr auto dispatch(Obj&& obj, std::span<char const> data) {
-    using protocol = [:remove_pointer(type_of(meta::get_nth_member(^^Super, 0))):];
-    
-    auto args = message::MessageView{data};
-    if constexpr (std::same_as<R, void>){
-      eval(std::forward<Obj>(obj), args);
-      return protocol::make_response(Idx);
+  static constexpr Protocol::message_type dispatch(Obj&& obj, std::span<char const> data) {
+    if constexpr (return_type_of(Meta) == ^^void) {
+      eval(std::forward<Obj>(obj), data);
+      return Protocol::make_response(Idx);
     } else {
-      return protocol::make_response(Idx, eval(std::forward<Obj>(obj), args));
+      return Protocol::make_response(Idx, eval(std::forward<Obj>(obj), data));
     }
   }
 };
 
-template <std::meta::info Meta, int Idx, typename Super, typename R, typename... Args>
-struct CallProxy<Meta, Idx, Super, R(Args...) const> : CallProxy<Meta, Idx, Super, R(Args...)> {};
+template <auto H, int Idx, typename Protocol>
+struct CustomDispatcher {
+  template <typename Obj>
+  static constexpr decltype(auto) eval(Obj&& obj, std::span<char const> data) {
+    // TODO figure out why it needs to be offset by 1
+    return (std::forward<Obj>(obj).[:H:])(data.subspan(1));
+  }
 
-template <typename T, typename U>
+  template <typename Obj>
+  static constexpr Protocol::message_type dispatch(Obj&& obj, std::span<char const> data) {
+    if constexpr (return_type_of(H) == ^^void) {
+      eval(std::forward<Obj>(obj), data);
+      return Protocol::make_response(Idx);
+    } else {
+      return Protocol::make_response(Idx, eval(std::forward<Obj>(obj), data));
+    }
+  }
+};
+
+template <std::meta::info Meta, int Idx, typename Super>
+struct FunctionTemplateProxy {
+  template <typename R, typename S, typename... Args>
+  static R call(S& service, std::span<char const> data) {
+    constexpr auto base = substitute(Meta, {});
+    constexpr auto skip = parameters_of(base).size();
+
+    return [:meta::expand(std::ranges::iota_view{skip, sizeof...(Args)}):] >> [&]<auto... Is> {
+      static_assert(can_substitute(Meta, {^^Args...[Is]...}), "Invalid template callback");
+
+      constexpr auto target = substitute(Meta, {^^Args...[Is]...});
+      auto reader           = erl::message::MessageView{data};
+      return service.[:target:](deserialize<Args>(reader)...);
+    };
+  }
+
+  template <typename... Args>
+  decltype(auto) operator()(Args&&... args) const {
+    // get a pointer to Proxy superobject from this subobject
+    constexpr static auto current_member = meta::get_nth_member(^^Super, Idx + 1);
+    Super* that = reinterpret_cast<Super*>(std::uintptr_t(this) - offset_of(current_member).bytes);
+
+    // first (unnamed) member of Proxy is a pointer to the actual handler
+    auto* handler = that->[:meta::get_nth_member(^^Super, 0):];
+
+    constexpr auto base = substitute(Meta, {});
+    constexpr auto skip = parameters_of(base).size();
+
+    using R = [:[:meta::expand(std::ranges::iota_view{skip, sizeof...(Args)}):] >> []<auto... Is> {
+      static_assert(can_substitute(Meta, {^^Args...[Is]...}), "Invalid template callback");
+      constexpr auto result = invoke_result(type_of(substitute(Meta, {^^Args...[Is]...})), {^^Args...});
+      // constexpr auto base_result = invoke_result(type_of(base), {});
+      // static_assert(result == base_result, "Inconsistent return type");
+
+      return result;
+    }:];
+
+    // accept Service as const& for const qualified member functions
+    using S = [:is_const(Meta) ? add_const(parent_of(Meta)) : parent_of(Meta):];
+
+    return handler->template call<R>(Idx, &FunctionTemplateProxy::call<R, S, std::remove_cvref_t<Args>...>,
+                                     std::forward<Args>(args)...);
+  }
+};
+
+template <std::meta::info Meta, int Idx, typename Protocol>
+struct FunctionTemplateDispatcher {
+  using return_type  = [:[:meta::expand(parameters_of(substitute(Meta, {}))):] >> []<auto... Params> {
+    return invoke_result(type_of(substitute(Meta, {})), {type_of(Params)...});
+  }:];
+  using service_type = [:is_const(Meta) ? add_const(parent_of(Meta)) : parent_of(Meta):];
+  using fnc_type     = return_type (*)(service_type&, std::span<char const>);
+
+  template <typename Obj>
+    requires(parent_of(Meta) == remove_cvref(^^Obj))
+  static constexpr decltype(auto) eval(Obj&& obj, Deserializer auto& args) {
+    fnc_type wrapper = deserialize<fnc_type>(args);
+
+    // TODO remove dependency on .buffer being a span
+    // do not forward obj - wrapper expects a lvalue reference
+    return wrapper(obj, args.buffer.subspan(args.cursor));
+  }
+
+  template <typename Obj>
+  static constexpr Protocol::message_type dispatch(Obj&& obj, std::span<char const> data) {
+    constexpr auto base = substitute(Meta, {});
+    auto args           = message::MessageView{data};
+
+    if constexpr (std::same_as<return_type, void>) {
+      eval(std::forward<Obj>(obj), args);
+      return Protocol::make_response(Idx);
+    } else {
+      return Protocol::make_response(Idx, eval(std::forward<Obj>(obj), args));
+    }
+  }
+};
+
+struct Policy {
+  template <typename Policy>
+  consteval auto get_remote_functions(this Policy&& self, std::meta::info type) {
+    return meta::named_members_of(type) | std::views::filter(std::meta::is_public) | std::views::filter(self) |
+           std::ranges::to<std::vector>();
+  }
+
+  template <typename Self>
+  consteval bool operator()(this Self&& self, std::meta::info member) {
+    return std::forward<Self>(self).is_remote(member);
+  }
+
+  template <typename Service, typename Client>
+  consteval auto make_proxy(this auto&& self, std::meta::info proxy) {
+    std::vector args = {data_member_spec(^^Client*)};
+    int index        = 0;
+
+    for (auto member_fnc : self.get_remote_functions(^^Service)) {
+      auto member = self.template make_proxy_member<Service>(proxy, index++, member_fnc);
+      args.push_back(member);
+    }
+    return args;
+  }
+
+  template <typename Service, typename Protocol>
+  consteval auto make_dispatcher(this auto&& self) {
+    std::vector<std::meta::info> args{};
+    int index = 0;
+
+    for (auto member_fnc : self.get_remote_functions(^^Service)) {
+      auto member = self.template make_dispatch_member<Service, Protocol>(index++, member_fnc);
+      args.push_back(member);
+    }
+    return args;
+  }
+};
+
+inline namespace policies {
+struct DefaultPolicy : Policy {
+  consteval bool is_remote(std::meta::info member) const { return is_function(member); }
+
+  template <typename Service>
+  consteval auto make_proxy_member(std::meta::info proxy, int index, std::meta::info fnc) const {
+    auto idx  = std::meta::reflect_value(index);
+    auto type = substitute(^^FunctionProxy, {idx, proxy, return_type_of(fnc)});
+    return data_member_spec(type, {.name = identifier_of(fnc)});
+  }
+
+  template <typename Service, typename Protocol>
+  consteval auto make_dispatch_member(int index, std::meta::info fnc) const {
+    auto idx = std::meta::reflect_value(index);
+    return substitute(^^FunctionDispatcher, {reflect_value(fnc), idx, ^^Protocol});
+  }
+};
+
+struct InProcess : Policy {
+  consteval bool is_remote(std::meta::info member) const {
+    if (is_function(member)) {
+      return true;
+    }
+    // only include function templates that require zero or more arguments
+    // we can only use function templates with a trailing parameter pack
+    return is_function_template(member) && can_substitute(member, {});
+  }
+
+  template <typename Service>
+  consteval auto make_proxy_member(std::meta::info proxy, int index, std::meta::info fnc) const {
+    auto idx = std::meta::reflect_value(index);
+    std::meta::info type;
+    if (is_function(fnc)) {
+      type = substitute(^^FunctionProxy, {idx, proxy, return_type_of(fnc)});
+    } else {
+      type = substitute(^^FunctionTemplateProxy, {reflect_value(fnc), idx, proxy});
+    }
+    return data_member_spec(type, {.name = identifier_of(fnc)});
+  }
+
+  template <typename Service, typename Protocol>
+  consteval auto make_dispatch_member(int index, std::meta::info fnc) const {
+    auto idx = std::meta::reflect_value(index);
+    if (is_function(fnc)) {
+      return substitute(^^FunctionDispatcher, {reflect_value(fnc), idx, ^^Protocol});
+    } else {
+      return substitute(^^FunctionTemplateDispatcher, {reflect_value(fnc), idx, ^^Protocol});
+    }
+  }
+};
+
+struct Annotated : Policy {
+  consteval bool is_remote(std::meta::info member) const {
+    if (is_function(member)) {
+      return !meta::has_annotation(member, annotations::skip);
+    }
+
+    if (is_function_template(member) && can_substitute(member, {})) {
+      return meta::has_annotation<annotations::Handler>(substitute(member, {}));
+    }
+    return false;
+  }
+
+  consteval auto return_of(std::meta::info member) const {
+    if (meta::has_annotation<annotations::Handler>(member)) {
+      auto handler = *annotation_of_type<annotations::Handler>(member);
+      return return_type_of(handler.fnc);
+    }
+    return return_type_of(member);
+  }
+
+  template <typename Service>
+  consteval auto make_proxy_member(std::meta::info proxy, int index, std::meta::info fnc) const {
+    auto idx = std::meta::reflect_value(index);
+    std::meta::info type;
+    if (is_function(fnc)) {
+      type = substitute(^^FunctionProxy, {idx, proxy, return_of(fnc)});
+    } else {
+      auto base = substitute(fnc, {});
+      type = substitute(^^FunctionProxy, {idx, proxy, return_of(base)});
+    }
+
+    return data_member_spec(type, {.name = identifier_of(fnc)});
+  }
+
+  template <typename Service, typename Protocol>
+  consteval auto make_dispatch_member(int index, std::meta::info fnc) const {
+    auto idx        = std::meta::reflect_value(index);
+    if (is_function(fnc)) {
+      if (meta::has_annotation(fnc, ^^annotations::handler)) {
+        auto handler = *annotation_of_type<annotations::Handler>(fnc);
+        return substitute(^^CustomDispatcher, {reflect_value(handler.fnc), idx, ^^Protocol});
+      }
+      return substitute(^^FunctionDispatcher, {reflect_value(fnc), idx, ^^Protocol});
+    } else {
+      auto base = substitute(fnc, {});
+      auto handler = *annotation_of_type<annotations::Handler>(base);
+      return substitute(^^CustomDispatcher, {reflect_value(handler.fnc), idx, ^^Protocol});
+    }
+  }
+};
+}  // namespace policies
+
+namespace _impl {
+template <typename Service, typename Client>
 consteval auto make_proxy_t() {
   struct Proxy;
   consteval {
-    std::vector args = {data_member_spec(^^U*)};
-    int index        = 0;
-
-    for (auto member_fnc : meta::member_functions_of(^^T)) {
-      auto type = substitute(^^CallProxy, {reflect_value(member_fnc), std::meta::reflect_value(index++), ^^Proxy});
-      args.push_back(data_member_spec(type, {.name = identifier_of(member_fnc)}));
-    }
-
-    define_aggregate(^^Proxy, args);
+    auto policy = typename Service::policy{};
+    define_aggregate(^^Proxy, policy.template make_proxy<Service, Client>(^^Proxy));
   }
   static_assert(is_type(^^Proxy), "Could not inject RPC proxy class");
   return ^^Proxy;
 }
 
-
-
-#define $generate_case(Idx)                                   \
-  case (Idx):                                                 \
-    if constexpr ((Idx) < sizeof...(Members) - 1) {           \
-      using call_type = Members...[(Idx) + 1];                \
-      return call_type::dispatch(std::forward<T>(obj), args); \
-    }                                                         \
-    std::unreachable();
-
-#define $generate_strategy(Idx, Stamper)                                                     \
-  template <>                                                                                \
-  struct DispatchStrategy<(Idx)> {                                                           \
-    template <typename T, typename... Members>                                               \
-    static constexpr auto dispatch(T&& obj, std::size_t index, std::span<char const> args) { \
-      switch (index) { Stamper(0, $generate_case); }                                         \
-      std::unreachable();                                                                    \
-    }                                                                                        \
+template <typename... Members>
+struct Dispatcher {
+  template <typename T>
+  constexpr static auto operator()(T&& obj, std::size_t index, std::span<char const> args) {
+    static_assert(sizeof...(Members) <= 256, "Too many callbacks");
+    constexpr static int strategy_idx = sizeof...(Members) <= 4    ? 1
+                                        : sizeof...(Members) <= 16 ? 2
+                                        : sizeof...(Members) <= 64 ? 3
+                                                                   : 4;
+    using strategy                    = _dispatch_impl::DispatchStrategy<strategy_idx>;
+    return strategy::template dispatch<T, Members...>(std::forward<T>(obj), index, args);
   }
+};
 
-template <int>
-struct DispatchStrategy;
-$generate_strategy(1, $stamp(4));    // 4^1 potential states
-$generate_strategy(2, $stamp(16));   // 4^2 potential states
-$generate_strategy(3, $stamp(64));   // 4^3 potential states
-$generate_strategy(4, $stamp(256));  // 4^4 potential states
-
-#undef $generate_strategy
-#undef $generate_case
-
-// template <>
-// struct DispatchStrategy<0> {
-//   // fallback
-//   template <typename T, typename... Members>
-//   static constexpr Buffer dispatch(T&& obj, Buffer msg) {
-//     using dispatch_type = Buffer (*)(T, Buffer);
-//     dispatch_type fnc   = nullptr;
-//     (void)((Members::index == msg.header.opcode ? fnc = &Members::dispatch, true : false) || ...);
-//     return fnc(std::forward<T>(obj), msg);
-//   }
-// };
-
-template <typename T, typename... Members>
-constexpr auto do_dispatch(T&& obj, std::size_t index, std::span<char const> args) {
-  constexpr static int strategy = sizeof...(Members) <= 4    ? 1
-                                  : sizeof...(Members) <= 16 ? 2
-                                  : sizeof...(Members) <= 64 ? 3
-                                                             // : sizeof...(Members) <= 256 ? 4
-                                                             : 4;
-  return DispatchStrategy<strategy>::template dispatch<T, Members...>(std::forward<T>(obj), index, args);
+template <typename Service, typename Protocol>
+consteval auto make_dispatcher_t() {
+  auto policy = typename Service::policy{};
+  return substitute(^^Dispatcher, policy.template make_dispatcher<Service, Protocol>());
 }
-}  // namespace impl
+}  // namespace _impl
 
-template <typename T, typename U = void>
-using Proxy = [:impl::make_proxy_t<std::remove_cvref_t<T>, U>():];
+template <typename T, typename U>
+using Proxy = [:_impl::make_proxy_t<std::remove_cvref_t<T>, U>():];
 
 template <typename T, typename U>
 auto make_proxy(U* client) {
   return Proxy<T, U>{client};
 }
 
-namespace impl {
 template <typename T, typename Protocol>
-consteval auto get_dispatcher() {
-  using proto = std::remove_cvref_t<Protocol>;
-
-  std::vector args = {^^T};
-  for (auto member : nonstatic_data_members_of(^^Proxy<std::remove_cvref_t<T>, proto>)) {
-    args.push_back(type_of(member));
-  }
-  using fnc_type = typename proto::message_type (*)(T&&, std::size_t, std::span<char const>);
-  return extract<fnc_type>(substitute(^^do_dispatch, args));
-}
-}  // namespace impl
+using Dispatcher = [:_impl::make_dispatcher_t<std::remove_cvref_t<T>, Protocol>():];
 
 }  // namespace erl::rpc

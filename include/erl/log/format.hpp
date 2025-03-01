@@ -15,15 +15,6 @@
 
 namespace erl::logging {
 namespace impl {
-  struct FormattingResult {
-    Location location;
-    std::string text;
-  };
-}
-
-using formatter_type = impl::FormattingResult (*)(std::span<char const>);
-
-namespace impl {
 
 template <util::fixed_string fmt_string, Location loc, typename... Args>
 impl::FormattingResult format(std::span<char const> data) {

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <print>
+#include <iostream>
 
 #include <erl/rpc/rpc.hpp>
 #include <erl/rpc/protocol.hpp>
@@ -10,6 +11,7 @@
 #include <erl/queue/spsc_bounded.hpp>
 #include <erl/reflect.hpp>
 #include <thread>
+#include "erl/log/message.hpp"
 #include "erl/net/message/reader.hpp"
 
 template <typename Proto>
@@ -46,7 +48,7 @@ struct EventCall {
 template <typename MsgType>
 struct RPCProtocol {
   using message_type = MsgType;
-  using index_type   = std::uint16_t;
+  using index_type   = std::uint32_t;
 
   template <typename... Args>
   static message_type request(index_type index, Args&&... args) {
@@ -61,7 +63,7 @@ struct RPCProtocol {
     auto reader                      = erl::message::MessageView{message};
     auto index                       = erl::deserialize<index_type>(reader);
     auto remainder                   = reader.buffer.subspan(reader.cursor);
-    constexpr static auto dispatcher = erl::rpc::impl::get_dispatcher<S, RPCProtocol>();
+    constexpr static auto dispatcher = erl::rpc::Dispatcher<S, RPCProtocol>{};
     return dispatcher(std::forward<S>(service), index, remainder);
   }
 
@@ -187,82 +189,101 @@ struct EventQueue {
 
   auto make_client() { return Mixin{Client{&events, nullptr}, call_type{}}; }
 };
+using namespace std::string_literals;
 
 struct TestService {
-  int echo(int num) { return num; }
-  void print(int num) { std::println("{}", num); }
+  using policy = erl::rpc::InProcess;
+
+  void print_num(int num) { std::println("print_num: {}", num); }
+  void print(auto... vals) {
+    std::print("print: ");
+    (std::print("{} ", vals), ...);
+    std::println("");
+  }
+  int accumulate(int first, auto... num) { return (first + ... + num); }
 };
 
-int main() {
-  // auto pipe = Pipe<RPCProtocol>();
-  auto pipe = EventQueue<RPCProtocol>{};
 
+
+#include <erl/log/logger.hpp>
+namespace erl::logging {
+
+struct LoggingService {
+  // std::vector<std::unique_ptr<Sink>> sinks;
+
+  using policy       = rpc::Annotated;
+  using message_type = erl::message::HybridBuffer<58>;
+  using protocol     = RPCProtocol<message_type>;
+  using call_type    = EventCall<protocol>;
+
+  void spawn(std::uint64_t thread){}
+  void exit(std::uint64_t thread){}
+  void rename(std::uint64_t thread, std::string_view name){}
+  void set_parent(std::uint64_t thread, std::uint64_t parent){}
+  void add_sink(Sink* sink){}
+  void remove_sink(Sink* sink){}
+
+private:
+  void handle_print(std::span<char const> data){
+    auto reader = erl::message::MessageView{data};
+    auto fnc = deserialize<formatter_type>(reader);
+    // auto prelude = deserialize<LoggingEvent>(reader);
+    // auto fnc     = reinterpret_cast<formatter_type>(prelude.handler_ptr);
+    auto [location, text] = fnc(reader.buffer.subspan(reader.cursor));
+    // auto timestamp = timestamp_t{std::chrono::system_clock::duration{prelude.timestamp}};
+    // auto message = Message{
+    //   .severity = prelude.severity,
+    //   .thread = {},
+    //   .timestamp = timestamp,
+    //   .location = location,
+    //   .text = text
+    // };
+
+    std::print("foo;  {}", text);
+  }
+
+public:
+  template <typename... Args>
+  [[= rpc::handler(^^LoggingService::handle_print)]]
+  static auto print(erl::logging::Severity severity, erl::logging::formatter_type formatter, Args&&... args) {
+    auto message   = Logger::message_type{};
+    auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
+    auto event     = LoggingEvent{.severity    = severity,
+                                  .thread      = erl::this_thread,
+                                  .timestamp   = timestamp,
+                                  .handler     = formatter};
+    // serialize(event, message);
+    serialize(formatter, message);
+    (serialize(std::forward<Args>(args), message), ...);
+    return message;
+  }
+};
+}  // namespace erl::logging
+
+
+auto logging_pipe = EventQueue<RPCProtocol>();
+
+template <typename... Args>
+void logg(erl::logging::FormatString<Args...> fmt, Args&&... args) {
+  auto client = logging_pipe.make_client();
+  auto remote = erl::rpc::make_proxy<erl::logging::LoggingService>(&client);
+  remote.print(erl::logging::INFO, fmt.format, std::forward<Args>(args)...);
+}
+
+
+int main() {
   auto x = std::jthread([&] {
-    auto service = TestService{};
-    auto server  = pipe.make_server();
+    // auto service = TestService{};
+    auto server  = logging_pipe.make_server();
+
+    auto service = erl::logging::LoggingService{};
     server.run(service);
   });
 
-  auto client = pipe.make_client();
-  auto remote = erl::rpc::make_proxy<TestService>(&client);
+  auto client = logging_pipe.make_client();
+  // auto remote = erl::rpc::make_proxy<erl::logging::LoggingService>(&client);
+  // auto remote = erl::rpc::make_proxy<TestService>(&client);
 
-  remote.echo(3);
-  // std::println("{}", result);
-  remote.print(42);
-  remote.print(24);
+  logg("foo {}", 42);
   client.kill();
 }
-
-// #include <erl/log/logger.hpp>
-// struct ThreadInfoService {
-//   void spawn(std::uint64_t thread);
-//   void exit(std::uint64_t thread);
-//   void rename(std::uint64_t thread, std::string_view name);
-//   void set_parent(std::uint64_t thread, std::uint64_t parent);
-// };
-
-// template <typename T>
-// struct LoggingProxy : erl::rpc::Proxy<ThreadInfoService, T> {
-//   template <typename... Args>
-//   void print(erl::logging::Severity severity, erl::logging::formatter_type formatter, Args&&... args) {
-//     auto* client = [:erl::meta::get_nth_member(^^erl::rpc::Proxy<ThreadInfoService, T>, 0):];
-//     client->send(std::vector<char>{});
-//   }
-// };
-
-// template <typename T>
-// struct LoggingProtocol : RPCProtocol<T> {
-//   using protocol = RPCProtocol<T>;
-
-//   template <typename S>
-//   static protocol::message_type dispatch(S&& service, std::span<char const> message) {
-//     auto reader                      = erl::message::MessageView{message};
-//     auto index                       = erl::deserialize<typename protocol::index_type>(reader);
-//     auto remainder                   = reader.buffer.subspan(reader.cursor);
-//     if (index == -1){
-//       handle_print(std::forward<S>(service), remainder);
-//     } else {
-//       constexpr static auto dispatcher = erl::rpc::impl::get_dispatcher<S, LoggingProtocol>();
-//       return dispatcher(std::forward<S>(service), index, remainder);
-//     }
-//   }
-
-//   template <typename S>
-//   static void handle_print(S&& service, std::span<char const> message){
-
-//   }
-// };
-
-// struct Logger {
-// static auto& event_queue() {
-//   static EventQueue<LoggingProtocol> queue{};
-//   return queue;
-// }
-
-// void run(){
-//   ThreadInfoService thread_service;
-//   auto server = event_queue().make_server();
-//   server.run(thread_service);
-// }
-
-// };

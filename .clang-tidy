@@ -19,7 +19,8 @@ Checks: "*,
         -*-avoid-c-arrays,
         -*-magic-numbers,
         -*-avoid-do-while,
-        -*-union-access
+        -*-union-access,
+        -readability-avoid-nested-conditional-operator
 "
 WarningsAsErrors: ''
 HeaderFilterRegex: ''
