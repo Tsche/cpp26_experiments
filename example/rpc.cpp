@@ -211,7 +211,7 @@ namespace erl::logging {
 struct LoggingService {
   // std::vector<std::unique_ptr<Sink>> sinks;
 
-  using policy       = rpc::Annotated;
+  using policy       = rpc::Policy<rpc::Annotated, rpc::DefaultPolicy>;
   using message_type = erl::message::HybridBuffer<58>;
   using protocol     = RPCProtocol<message_type>;
   using call_type    = EventCall<protocol>;
