@@ -17,13 +17,13 @@ namespace erl {
 
 template <typename T>
 concept Serializer = requires(T obj) {
-    { obj.write(nullptr, 1) } -> std::same_as<void>;
-    { obj.reserve(1) } -> std::same_as<void>;
+  { obj.write(nullptr, 1) } -> std::same_as<void>;
+  { obj.reserve(1) } -> std::same_as<void>;
 };
 
 template <typename T>
 concept Deserializer = requires(T obj) {
-    { obj.read(1) } -> std::same_as<std::span<char const>>;
+  { obj.read(1) } -> std::same_as<std::span<char const>>;
 };
 
 template <typename T>
@@ -33,37 +33,39 @@ struct Reflect {
 
 template <typename T>
 void serialize(T&& obj, Serializer auto& buffer) {
-    Reflect<std::remove_cvref_t<T>>::serialize(std::forward<T>(obj), buffer);
+  Reflect<std::remove_cvref_t<T>>::serialize(std::forward<T>(obj), buffer);
 }
 
 template <typename T>
 auto deserialize(Deserializer auto& buffer) {
-    return Reflect<std::remove_cvref_t<T>>::deserialize(buffer);
+  return Reflect<std::remove_cvref_t<T>>::deserialize(buffer);
 }
 
 template <std::integral T>
 struct Reflect<T> {
-    static void serialize(T arg, Serializer auto& buffer) {
-        if constexpr (std::endian::native == std::endian::big) {
-            arg = std::byteswap(arg);
-        }
-        buffer.write(&arg, sizeof(arg));
+  static void serialize(T arg, Serializer auto& buffer) {
+    if constexpr (std::endian::native == std::endian::big) {
+      arg = std::byteswap(arg);
     }
+    buffer.write(&arg, sizeof(arg));
+  }
 
-    static T deserialize(Deserializer auto& buffer) {
-        std::remove_const_t<T> value;
+  static T deserialize(Deserializer auto& buffer) {
+    std::remove_const_t<T> value;
 
-        auto raw = buffer.read(sizeof(T));
-        std::memcpy(&value, raw.data(), sizeof(T));
+    auto raw = buffer.read(sizeof(T));
+    std::memcpy(&value, raw.data(), sizeof(T));
 
-        if constexpr (std::endian::native == std::endian::big) {
-            value = std::byteswap(value);
-        }
-        return value;
+    if constexpr (std::endian::native == std::endian::big) {
+      value = std::byteswap(value);
     }
+    return value;
+  }
 
-    consteval static void hash_append(auto& hasher) { hasher(display_string_of(^^T)); }
+  consteval static void hash_append(auto& hasher) { hasher(display_string_of(^^T)); }
 };
+
+// TODO floats
 
 namespace impl {
 template <typename T>
@@ -73,7 +75,7 @@ concept pair_like = requires(T obj) {
   requires std::is_same_v<typename T::first_type, decltype(obj.first)>;
   requires std::is_same_v<typename T::second_type, decltype(obj.second)>;
 };
-}
+}  // namespace impl
 
 template <impl::pair_like T>
 struct Reflect<T> {
@@ -85,7 +87,9 @@ struct Reflect<T> {
   }
 
   static T deserialize(Deserializer auto& buffer) {
-    return T(erl::deserialize<first_type>(buffer), erl::deserialize<second_type>(buffer));
+    auto first  = erl::deserialize<first_type>(buffer);
+    auto second = erl::deserialize<second_type>(buffer);
+    return T(first, second);
   }
 
   consteval static void hash_append(auto& hasher) {
@@ -99,13 +103,11 @@ template <typename T>
   requires std::is_enum_v<T>
 struct Reflect<T> {
   static void serialize(auto&& arg, Serializer auto& target) {
-    erl::serialize<std::underlying_type_t<T>>(
-      static_cast<std::underlying_type_t<T>>(std::forward<decltype(arg)>(arg)), 
-      target);
+    erl::serialize<std::underlying_type_t<T>>(static_cast<std::underlying_type_t<T>>(std::forward<decltype(arg)>(arg)),
+                                              target);
   }
 
-  static T deserialize(Deserializer auto& buffer) { 
-    return T(erl::deserialize<std::underlying_type_t<T>>(buffer)); }
+  static T deserialize(Deserializer auto& buffer) { return T(erl::deserialize<std::underlying_type_t<T>>(buffer)); }
 
   consteval static void hash_append(auto& hasher) {
     hasher(display_string_of(^^T));
@@ -118,14 +120,13 @@ template <template <typename...> class Variant, typename... Ts>
 struct Reflect<Variant<Ts...>> {
   static void serialize(auto&& arg, Serializer auto& target) {
     erl::serialize(arg.index(), target);
-    std::visit([&](auto&& alt) { 
-      erl::serialize(alt, target); 
-    }, arg);
+    std::visit([&](auto&& alt) { erl::serialize(alt, target); }, arg);
   }
 
   static decltype(auto) deserialize(Deserializer auto& buffer) {
     auto index = erl::deserialize<std::size_t>(buffer);
     return [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
+      // TODO change approach - this fails for move only alternatives etc
       union Storage {
         char dummy{};
         Variant<Ts...> variant;
@@ -148,7 +149,7 @@ template <typename T>
 struct Reflect<T> {
   static void serialize(auto&& arg, Serializer auto& target) {
     // auto[...members] = arg;
-    //(Reflect<[:remove_cvref(type_of(members)):]>::serialize(arg.[:members:], target), ...);
+    //(Reflect<std::remove_cvref_t<decltype(members)>>::serialize(members, target), ...);
     return [:meta::expand(nonstatic_data_members_of(^^T)):] >> [&]<auto... Members>() {
       return (erl::serialize(arg.[:Members:], target), ...);
     };
@@ -183,6 +184,8 @@ struct Reflect<T> {
   }
 
   static auto deserialize(Deserializer auto& buffer) {
+    // TODO reject deserialization to non-owning views, force conversion in calling code
+
     std::uint32_t size = erl::deserialize<std::uint32_t>(buffer);
     std::vector<element_type> elements{};
     elements.reserve(size);
@@ -228,7 +231,8 @@ struct Reflect<T[N]> {
 
 template <typename R, typename... Args>
 struct Reflect<R (*)(Args...)> {
-  using type = R(*)(Args...);
+  // TODO clarify that this only works with in-process transports
+  using type = R (*)(Args...);
 
   static void serialize(type arg, Serializer auto& target) {
     auto value = std::uintptr_t(arg);
@@ -241,15 +245,16 @@ struct Reflect<R (*)(Args...)> {
   }
 
   consteval static void hash_append(auto& hasher) {
-    hasher(display_string_of(^^R(*)(Args...)));
+    hasher(display_string_of(^^R (*)(Args...)));
     Reflect<std::remove_cvref_t<R>>::hash_append(hasher);
     (Reflect<std::remove_cvref_t<Args>>::hash_append(hasher), ...);
   }
 };
 
 template <typename T>
-  requires (!std::same_as<std::remove_const_t<T>, char>)
+  requires(!std::same_as<std::remove_const_t<T>, char>)
 struct Reflect<T*> {
+  // TODO clarify that this only works with in-process transports
   using type = T*;
 
   static void serialize(type arg, Serializer auto& target) {
@@ -269,9 +274,9 @@ struct Reflect<T*> {
 };
 
 template <typename T, typename Hasher = util::FNV1a>
-consteval auto hash_type(){
-    auto hasher = Hasher{};
-    Reflect<std::remove_cvref_t<T>>::hash_append(hasher);
-    return hasher.finalize();
+consteval auto hash_type() {
+  auto hasher = Hasher{};
+  Reflect<std::remove_cvref_t<T>>::hash_append(hasher);
+  return hasher.finalize();
 }
-}  // namespace rpc
+}  // namespace erl

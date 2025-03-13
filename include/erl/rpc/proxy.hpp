@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <cstddef>
 #include <type_traits>
 #include <vector>
@@ -14,7 +15,7 @@
 #include "dispatch.hpp"
 
 namespace erl::rpc {
-inline namespace annotations {
+namespace annotations {
 struct Handler {
   std::meta::info fnc;
   friend bool operator==(Handler const& self, std::optional<Handler> const& other) {
@@ -29,11 +30,11 @@ consteval Handler handler(std::meta::info fnc) {
   return {fnc};
 }
 
-struct SkipTag {};
-constexpr inline SkipTag skip{};
+struct CallbackTag {
+} constexpr inline callback{};
 }  // namespace annotations
 
-template <int Idx, typename Super, typename R>
+template <typename Service, int Idx, typename Super, typename R>
 struct FunctionProxy {
   template <typename... Ts>
   decltype(auto) operator()(Ts&&... args) const {
@@ -43,7 +44,7 @@ struct FunctionProxy {
 
     // first (unnamed) member of Proxy is a pointer to the actual handler
     auto* handler = that->[:meta::get_nth_member(^^Super, 0):];
-    return handler->template call<R>(Idx, std::forward<Ts>(args)...);
+    return handler->template call<Service, R>(Idx, std::forward<Ts>(args)...);
   }
 };
 
@@ -73,8 +74,7 @@ template <auto H, int Idx, typename Protocol>
 struct CustomDispatcher {
   template <typename Obj>
   static constexpr decltype(auto) eval(Obj&& obj, std::span<char const> data) {
-    // TODO figure out why it needs to be offset by 1
-    return (std::forward<Obj>(obj).[:H:])(data.subspan(1));
+    return (std::forward<Obj>(obj).[:H:])(data);
   }
 
   template <typename Obj>
@@ -128,8 +128,8 @@ struct FunctionTemplateProxy {
     // accept Service as const& for const qualified member functions
     using S = [:is_const(Meta) ? add_const(parent_of(Meta)) : parent_of(Meta):];
 
-    return handler->template call<R>(Idx, &FunctionTemplateProxy::call<R, S, std::remove_cvref_t<Args>...>,
-                                     std::forward<Args>(args)...);
+    return handler->template call<std::remove_const_t<S>, R>(
+        Idx, &FunctionTemplateProxy::call<R, S, std::remove_cvref_t<Args>...>, std::forward<Args>(args)...);
   }
 };
 
@@ -175,7 +175,8 @@ struct Policy {
     for (auto member_fnc : meta::named_members_of(^^Service)) {
       std::meta::info member;
 
-      if (((Ps::is_remote(member_fnc) && ((member = Ps::template make_proxy_member<Service>(proxy, index++, member_fnc)) != std::meta::info{})) ||
+      if (((Ps::is_remote(member_fnc) &&
+            ((member = Ps::template make_proxy_member<Service>(proxy, index++, member_fnc)) != std::meta::info{})) ||
            ...)) {
         args.push_back(member);
       }
@@ -201,14 +202,16 @@ struct Policy {
   }
 };
 
-inline namespace policies {
-struct DefaultPolicy {
-  consteval static bool is_remote(std::meta::info member) { return is_function(member); }
+namespace policies {
+struct DefaultPolicy : Policy<DefaultPolicy> {
+  consteval static bool is_remote(std::meta::info member) {
+    return is_public(member) && is_function(member);
+  }
 
   template <typename Service>
   consteval static std::meta::info make_proxy_member(std::meta::info proxy, int index, std::meta::info fnc) {
     auto idx  = std::meta::reflect_value(index);
-    auto type = substitute(^^FunctionProxy, {idx, proxy, return_type_of(fnc)});
+    auto type = substitute(^^FunctionProxy, {^^Service, idx, proxy, return_type_of(fnc)});
     return data_member_spec(type, {.name = identifier_of(fnc)});
   }
 
@@ -219,8 +222,12 @@ struct DefaultPolicy {
   }
 };
 
-struct InProcess {
+struct InProcess : Policy<InProcess> {
   consteval static bool is_remote(std::meta::info member) {
+    if (!is_public(member)) {
+      return false;
+    }
+
     // only include function templates that require zero or more arguments
     // we can only use function templates with a trailing parameter pack
     return is_function_template(member) && can_substitute(member, {});
@@ -228,7 +235,7 @@ struct InProcess {
 
   template <typename Service>
   consteval static std::meta::info make_proxy_member(std::meta::info proxy, int index, std::meta::info fnc) {
-    auto idx = std::meta::reflect_value(index);
+    auto idx             = std::meta::reflect_value(index);
     std::meta::info type = substitute(^^FunctionTemplateProxy, {reflect_value(fnc), idx, proxy});
     return data_member_spec(type, {.name = identifier_of(fnc)});
   }
@@ -240,10 +247,14 @@ struct InProcess {
   }
 };
 
-struct Annotated {
+struct Annotated : Policy<Annotated> {
   consteval static bool is_remote(std::meta::info member) {
+    if (!is_public(member)) {
+      return false;
+    }
+
     if (is_function(member)) {
-      return !meta::has_annotation(member, annotations::skip);
+      return meta::has_annotation<annotations::CallbackTag>(member) || meta::has_annotation<annotations::Handler>(member);
     }
 
     if (is_function_template(member) && can_substitute(member, {})) {
@@ -253,22 +264,24 @@ struct Annotated {
   }
 
   consteval static auto return_of(std::meta::info member) {
-    if (meta::has_annotation<annotations::Handler>(member)) {
-      auto handler = *annotation_of_type<annotations::Handler>(member);
-      return return_type_of(handler.fnc);
+    if (auto handler = annotation_of_type<annotations::Handler>(member); handler){
+      return return_type_of(handler->fnc);
     }
     return return_type_of(member);
   }
 
   template <typename Service>
   consteval static std::meta::info make_proxy_member(std::meta::info proxy, int index, std::meta::info fnc) {
+    // return type of public handler will always be the message type
+    // TODO grab actual return type from handler
+
     auto idx = std::meta::reflect_value(index);
     std::meta::info type;
     if (is_function(fnc)) {
-      type = substitute(^^FunctionProxy, {idx, proxy, return_of(fnc)});
+      type = substitute(^^FunctionProxy, {^^Service, idx, proxy, return_of(fnc)});
     } else {
       auto base = substitute(fnc, {});
-      type      = substitute(^^FunctionProxy, {idx, proxy, return_of(base)});
+      type      = substitute(^^FunctionProxy, {^^Service, idx, proxy, return_of(base)});
     }
 
     return data_member_spec(type, {.name = identifier_of(fnc)});
@@ -278,15 +291,16 @@ struct Annotated {
   consteval static std::meta::info make_dispatch_member(int index, std::meta::info fnc) {
     auto idx = std::meta::reflect_value(index);
     if (is_function(fnc)) {
-      if (meta::has_annotation(fnc, ^^annotations::handler)) {
-        auto handler = *annotation_of_type<annotations::Handler>(fnc);
-        return substitute(^^CustomDispatcher, {reflect_value(handler.fnc), idx, ^^Protocol});
+      if (auto handler = annotation_of_type<annotations::Handler>(fnc); handler){
+        return substitute(^^CustomDispatcher, {reflect_value(handler->fnc), idx, ^^Protocol});
       }
       return substitute(^^FunctionDispatcher, {reflect_value(fnc), idx, ^^Protocol});
     } else {
       auto base    = substitute(fnc, {});
-      auto handler = *annotation_of_type<annotations::Handler>(base);
-      return substitute(^^CustomDispatcher, {reflect_value(handler.fnc), idx, ^^Protocol});
+      if (auto handler = annotation_of_type<annotations::Handler>(base); handler) {
+        return substitute(^^CustomDispatcher, {reflect_value(handler->fnc), idx, ^^Protocol});
+      }
+      std::unreachable();
     }
   }
 };
