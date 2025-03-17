@@ -1,9 +1,4 @@
-project(slo)
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -v")
-# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
-
-# add_executable(echo "echo.cpp")
-# target_link_libraries(echo PRIVATE erl)
+project(slo C CXX)
 
 function(DEFINE_EXAMPLE TARGET)
   add_executable(${TARGET} "${TARGET}.cpp")
@@ -13,3 +8,8 @@ endfunction()
 define_example(logging)
 define_example(args)
 define_example(rpc)
+
+add_library(demo_plugin SHARED "plugins/demo.cpp")
+target_link_libraries(demo_plugin PRIVATE erl)
+
+define_example(plugin)

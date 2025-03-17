@@ -336,4 +336,4 @@ struct std::tuple_element<I, erl::kwargs_t<T>> {
   using type = [:erl::meta::get_nth_member(^^T, I):];
 };
 
-#define make_args(...) ::erl::kwargs::from_lambda<#__VA_ARGS__>([__VA_ARGS__] {})
+#define $make_args(...) ::erl::kwargs::from_lambda<#__VA_ARGS__>([__VA_ARGS__] {})
