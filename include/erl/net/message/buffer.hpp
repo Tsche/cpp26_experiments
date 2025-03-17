@@ -107,6 +107,10 @@ public:
     cursor -= length;
   }
 
+  void write(std::span<char const> data){
+    write(data.data(), data.size());
+  }
+
   void reserve(unsigned num_bytes) {
     auto new_size = size() + num_bytes;
     if (is_heap()) {

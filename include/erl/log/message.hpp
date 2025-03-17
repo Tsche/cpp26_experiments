@@ -1,4 +1,5 @@
 #pragma once
+#include <span>
 #include <cstdint>
 #include <string>
 #include <ctime>
@@ -7,10 +8,6 @@
 #include <erl/thread.hpp>
 
 namespace erl::logging {
-enum class EventKind : std::uint8_t { LOGGING, THREAD_INFO };
-
-enum class ThreadEvent : std::uint8_t { SPAWN, EXIT, RENAME, SET_PARENT };
-
 struct Location {
   char const* file{""};
   char const* function{""};
@@ -26,7 +23,7 @@ struct CachedThreadInfo {
 
 using timestamp_t = std::chrono::system_clock::time_point;
 
-enum Severity : std::uint8_t { DEBUG, INFO, WARNING, ERROR, FATAL };
+enum Severity : std::uint8_t { TRACE, DEBUG, INFO, WARNING, ERROR, FATAL };
 
 namespace impl {
   struct FormattingResult {
@@ -41,9 +38,6 @@ struct LoggingEvent {
   Severity severity;
   ThreadInfo thread;
   long long timestamp;
-
-  // todo deserialize pointer to function
-  // std::uintptr_t handler_ptr;
   formatter_type handler;
 };
 

@@ -2,7 +2,11 @@
 #include <format>
 #include <string_view>
 #include <string>
+#include <array>
+#include <initializer_list>
 #include <erl/util/string.hpp>
+
+#include <erl/log/message.hpp>
 
 namespace erl::color {
 constexpr std::string make_ansi_code(unsigned option) {
@@ -34,12 +38,12 @@ struct ANSICode {
   static constexpr auto value = [:meta::intern(make_ansi_code(Code)):];
 
   template <unsigned N>
-  friend auto operator|(ANSICode self, ANSICode<N> const&) {
+  constexpr friend auto operator|(ANSICode self, ANSICode<N> const&) {
     return ANSICodes<Code, N>{};
   }
 
   template <unsigned... N>
-  friend auto operator|(ANSICode self, ANSICodes<N...> const&) {
+  constexpr friend auto operator|(ANSICode self, ANSICodes<N...> const&) {
     return ANSICodes<Code, N...>{};
   }
 
@@ -61,12 +65,12 @@ struct ANSICodes {
   static constexpr auto value = [:meta::intern(make_ansi_code(Codes...)):];
 
   template <unsigned N>
-  friend auto operator|(ANSICodes, ANSICode<N> const&) {
+  constexpr friend auto operator|(ANSICodes, ANSICode<N> const&) {
     return ANSICodes<Codes..., N>{};
   }
 
   template <unsigned... N>
-  friend auto operator|(ANSICodes, ANSICodes<N...> const&) {
+  constexpr friend auto operator|(ANSICodes, ANSICodes<N...> const&) {
     return ANSICodes<Codes..., N...>{};
   }
 
@@ -129,4 +133,17 @@ inline constexpr color::ANSICode<8> Hidden{};
 inline constexpr color::ANSICode<9> Strikethrough{};
 inline constexpr color::ANSICode<0> Reset{};
 };  // namespace style
+
+using ColorMap = std::array<std::string_view, enumerators_of(^^erl::logging::Severity).size()>;
+
+constexpr auto color_map(std::initializer_list<std::pair<erl::logging::Severity, std::string_view>> mappings){
+    ColorMap ret{};
+    for (auto [severity, data] : mappings){
+        if (severity >= ret.max_size()) {
+            continue;
+        }
+        ret[severity] = data;
+    }
+    return ret;
+}
 }  // namespace erl

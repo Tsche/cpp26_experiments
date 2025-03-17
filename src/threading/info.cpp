@@ -92,7 +92,8 @@ bool ThreadInfo::is_valid() const {
 
 ThreadInfo const& ThreadInfo::set_name(std::string const& name) const {
   thread::impl::set_name(id, name);
-  logging::Logger::thread_rename(id, name);
+  // TODO
+  logging::Logger::client().rename(id, name);
   return *this;
 }
 
@@ -112,9 +113,7 @@ std::string ThreadInfo::get_name() const {
 
 ThreadInfo const& ThreadInfo::set_parent(ThreadInfo parent) const {
   // ensure_unregistration(id);
-  logging::Logger::thread_set_parent(id, parent.id);
-  // auto& cache = ThreadCache::get_cache();
-  // cache.set_parent(id, parent.id);
+  logging::Logger::client().set_parent(id, parent.id);
   return *this;
 }
 

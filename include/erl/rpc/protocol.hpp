@@ -1,10 +1,13 @@
 #pragma once
 #include <cstdint>
+#include <experimental/meta>
 #include <span>
 
 #include <erl/rpc/proxy.hpp>
 #include <erl/reflect.hpp>
 #include <erl/net/message/reader.hpp>
+
+#include <print>
 
 namespace erl::rpc {
 template <typename Client>
@@ -57,6 +60,15 @@ struct RPCProtocol {
     auto message = message_type{};
     erl::serialize(index, message);
     (erl::serialize(std::forward<Args>(args), message), ...);
+    return message;
+  }
+
+  template <typename... Args>
+  static message_type request(index_type index, message_type payload) {
+    auto message = message_type{};
+    erl::serialize(index, message);
+    message.reserve(payload.size());
+    message.write(payload.finalize());
     return message;
   }
 

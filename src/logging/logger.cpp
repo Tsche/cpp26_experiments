@@ -1,146 +1,81 @@
-#include <print>
+#include <chrono>
 
 #include <erl/log/logger.hpp>
 #include <erl/log/message.hpp>
-#include <erl/reflect.hpp>
-#include "erl/thread.hpp"
+#include <erl/net/message/reader.hpp>
 
 namespace erl::logging {
-
-void Logger::send(EventKind event, std::span<char const> message) {
-  auto data = message_type{};
-  serialize(event, data);
-  data.write(message.data(), message.size());
-  message_queue().push(data);
+namespace _impl {
+ThreadEventHelper::ThreadEventHelper() noexcept {
+  Logger::client().spawn(this_thread.id);
 }
-
-void Logger::run() {
-  erl::this_thread.set_name("logger");
-  auto token = stop_source.get_token();
-  // std::stop_callback on_stop{token, []() { message_queue().notify_all(); }};
-
-  while (true) {
-    auto msg = message_queue().pop(token);
-    if (msg.is_empty()) {
-      break;
-    }
-
-    auto reader = message::MessageView{msg.finalize()};
-    auto kind   = deserialize<EventKind>(reader);
-    switch (kind) {
-      using enum EventKind;
-      case LOGGING: handle_message(reader); break;
-      case THREAD_INFO: handle_thread_event(reader); break;
-    }
-  }
+ThreadEventHelper::~ThreadEventHelper() noexcept {
+  Logger::client().exit(this_thread.id);
 }
+}  // namespace _impl
 
-void Logger::handle_message(message::MessageView& data) {
-  auto prelude = deserialize<LoggingEvent>(data);
-  auto [location, text] = prelude.handler(data.buffer.subspan(data.cursor));
-  auto timestamp = timestamp_t{std::chrono::system_clock::duration{prelude.timestamp}};
-  auto message = Message{
-    .severity = prelude.severity,
-    .thread = thread_get_info(prelude.thread.id),
-    .timestamp = timestamp,
-    .location = location,
-    .text = text
-  };
-  dispatch(&Sink::print, message);
-}
-
-void Logger::handle_thread_event(message::MessageView& data) {
-  auto event = deserialize<ThreadEvent>(data);
-  auto id    = deserialize<std::uint64_t>(data);
-  switch (event) {
-    using enum ThreadEvent;
-    case SPAWN: {
-      auto& info = threads[id];
-      info.id = id;
-      dispatch(&Sink::spawn, info);
-      break;
-    }
-    case EXIT: {
-      if (auto it = threads.find(id); it != threads.end()){
-        dispatch(&Sink::exit, it->second);
-      } else {
-        dispatch(&Sink::exit, CachedThreadInfo{.id=id});
-      }
-
-      threads.erase(id);
-      break;
-    }
-    case RENAME: {
-      auto name = deserialize<std::string>(data);
-
-      auto& info = threads[id];
-      dispatch(&Sink::rename, info, name);
-      info.name = name;
-
-      break;
-    }
-    case SET_PARENT: {
-      auto parent_id = deserialize<std::uint64_t>(data);
-
-      auto& info = threads[id];
-      auto& parent = threads[parent_id];
-      if (parent.id != parent_id) {
-        // parent just created
-        parent.id = parent_id;
-      }
-
-      dispatch(&Sink::set_parent, info, parent);
-      info.parent = parent_id;
-      break;
-    }
-  }
-}
-
-void Logger::thread_spawn(std::uint64_t thread) {
-  auto message = message_type{};
-  serialize(ThreadEvent::SPAWN, message);
-  serialize(thread, message);
-  send(EventKind::THREAD_INFO, message.finalize());
-}
-
-void Logger::thread_exit(std::uint64_t thread) {
-  auto message = message_type{};
-  serialize(ThreadEvent::EXIT, message);
-  serialize(thread, message);
-  send(EventKind::THREAD_INFO, message.finalize());
-}
-
-void Logger::thread_rename(std::uint64_t thread, std::string_view name) {
-  auto message = message_type{};
-  serialize(ThreadEvent::RENAME, message);
-  serialize(thread, message);
-  serialize(name, message);
-  send(EventKind::THREAD_INFO, message.finalize());
-}
-
-void Logger::thread_set_parent(std::uint64_t thread, std::uint64_t parent) {
-  auto message = message_type{};
-  serialize(ThreadEvent::SET_PARENT, message);
-  serialize(thread, message);
-  serialize(parent, message);
-  send(EventKind::THREAD_INFO, message.finalize());
-}
-
-CachedThreadInfo Logger::thread_get_info(std::uint64_t thread) {
+CachedThreadInfo LoggingService::thread_get_info(std::uint64_t thread) {
   auto it = threads.find(thread);
   if (it != threads.end()) {
     return it->second;
   }
   // todo generate if not found
-  return {.id=thread};
+  return {.id = thread};
 }
 
-namespace impl {
-ThreadEventHelper::ThreadEventHelper() noexcept {
-  Logger::thread_spawn(this_thread.id);
+void LoggingService::handle_print(std::span<char const> data) {
+  auto reader           = erl::message::MessageView{data};
+  auto event            = deserialize<LoggingEvent>(reader);
+  auto [location, text] = event.handler(reader.buffer.subspan(reader.cursor));
+  auto timestamp        = timestamp_t{std::chrono::system_clock::duration{event.timestamp}};
+  auto message          = Message{.severity  = event.severity,
+                                  .thread    = thread_get_info(event.thread.id),
+                                  .timestamp = timestamp,
+                                  .location  = location,
+                                  .text      = text};
+  dispatch(&Sink::print, message);
 }
-ThreadEventHelper::~ThreadEventHelper() noexcept {
-  Logger::thread_exit(this_thread.id);
+
+void LoggingService::spawn(std::uint64_t thread) {
+  auto& info = threads[thread];
+  info.id    = thread;
+  dispatch(&Sink::spawn, info);
 }
-}  // namespace impl
+
+void LoggingService::exit(std::uint64_t thread) {
+  if (auto it = threads.find(thread); it != threads.end()) {
+    dispatch(&Sink::exit, it->second);
+  } else {
+    dispatch(&Sink::exit, CachedThreadInfo{.id = thread});
+  }
+
+  threads.erase(thread);
+}
+
+void LoggingService::rename(std::uint64_t thread, std::string_view name) {
+  auto& info = threads[thread];
+  dispatch(&Sink::rename, info, name);
+  info.name = name;
+}
+
+void LoggingService::set_parent(std::uint64_t thread, std::uint64_t parent_id) {
+  auto& info   = threads[thread];
+  auto& parent = threads[parent_id];
+  if (parent.id != parent_id) {
+    // parent just created
+    parent.id = parent_id;
+  }
+
+  dispatch(&Sink::set_parent, info, parent);
+  info.parent = parent_id;
+}
+
+void LoggingService::add_sink(Sink* sink) {
+  sinks.push_back(sink);
+}
+
+void LoggingService::remove_sink(Sink* sink) {
+  std::erase(sinks, sink);
+}
+
 }  // namespace erl::logging

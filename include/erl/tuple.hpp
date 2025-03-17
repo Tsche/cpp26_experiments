@@ -14,15 +14,6 @@ struct Tuple {
   Tuple(Ts const&... values) : data{values...} {}
 };
 
-template <typename... Ts>
-struct std::tuple_size<Tuple<Ts...>> : public integral_constant<size_t, sizeof...(Ts)> {};
-
-template <std::size_t I, typename... Ts>
-struct std::tuple_element<I, Tuple<Ts...>> {
-  static constexpr std::array types = {^^Ts...};
-  using type                        = [:types[I]:];
-};
-
 template <std::size_t I, typename... Ts>
 constexpr auto get(Tuple<Ts...>& t) noexcept -> std::tuple_element_t<I, Tuple<Ts...>>& {
   return t.data.[:meta::nth_nsdm<decltype(t.data)>(I):];
@@ -38,3 +29,12 @@ constexpr auto get(Tuple<Ts...>&& t) noexcept -> std::tuple_element_t<I, Tuple<T
   return std::move(t).data.[:meta::nth_nsdm<decltype(t.data)>(I):];
 }
 }  // namespace erl
+
+template <typename... Ts>
+struct std::tuple_size<erl::Tuple<Ts...>> : public integral_constant<size_t, sizeof...(Ts)> {};
+
+template <std::size_t I, typename... Ts>
+struct std::tuple_element<I, erl::Tuple<Ts...>> {
+  static constexpr std::array types = {^^Ts...};
+  using type                        = [:types[I]:];
+};

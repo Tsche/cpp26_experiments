@@ -120,21 +120,26 @@ consteval auto intern(R&& iterable) {
 }
 
 namespace impl {
-template <auto... Vs>
+template <auto... Elts>
 struct Replicator {
   template <typename F>
   constexpr decltype(auto) operator>>(F fnc) const {
-    return fnc.template operator()<Vs...>();
+    return fnc.template operator()<Elts...>();
   }
 
   template <typename F>
   constexpr void operator>>=(F fnc) const {
-    (fnc.template operator()<Vs>(), ...);
+    (fnc.template operator()<Elts>(), ...);
   }
 };
 
-template <auto... Vs>
-constexpr inline Replicator<Vs...> replicator{};
+template <auto... Elts>
+constexpr inline Replicator<Elts...> replicator{};
+
+template <std::size_t Idx, auto... Elts>
+constexpr auto get(Replicator<Elts...> const&){
+    return Elts...[Idx];
+}
 }  // namespace impl
 
 template <std::ranges::range R>
@@ -166,3 +171,12 @@ constexpr inline auto enumerator_names = [:expand(enumerators_of(^^T)):] >> []<s
   return std::array{std::string_view{identifier_of(Enumerators)}...};
 };
 }  // namespace erl::meta
+
+template <auto... Elts>
+struct std::tuple_size<erl::meta::impl::Replicator<Elts...>>
+    : std::integral_constant<std::size_t, sizeof...(Elts)> {};
+
+template <std::size_t Idx, auto... Elts>
+struct std::tuple_element<Idx, erl::meta::impl::Replicator<Elts...>> {
+    using type = decltype(Elts...[Idx]);
+};

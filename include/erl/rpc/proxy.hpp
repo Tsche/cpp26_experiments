@@ -70,6 +70,25 @@ struct FunctionDispatcher {
   }
 };
 
+template <typename Service, int Idx, typename Super, typename R, std::meta::info H>
+struct CustomProxy {
+  template <typename... Ts>
+  decltype(auto) operator()(Ts&&... args) const {
+    // get a pointer to Proxy superobject from this subobject
+    constexpr static auto current_member = meta::get_nth_member(^^Super, Idx + 1);
+    Super* that = reinterpret_cast<Super*>(std::uintptr_t(this) - offset_of(current_member).bytes);
+
+    // first (unnamed) member of Proxy is a pointer to the actual handler
+    auto* handler = that->[:meta::get_nth_member(^^Super, 0):];
+
+    // TODO find better way to substitute function template in
+    // this assumes the only template arguments are a trailing pack
+    constexpr static auto non_template_args = parameters_of(substitute(H, {})).size();
+    auto message = [:substitute(H, std::vector{^^Ts...} | std::views::drop(non_template_args)):](std::forward<Ts>(args)...);
+    return handler->template call<Service, R>(Idx, message);
+  }
+};
+
 template <auto H, int Idx, typename Protocol>
 struct CustomDispatcher {
   template <typename Obj>
@@ -204,9 +223,7 @@ struct Policy {
 
 namespace policies {
 struct DefaultPolicy : Policy<DefaultPolicy> {
-  consteval static bool is_remote(std::meta::info member) {
-    return is_public(member) && is_function(member);
-  }
+  consteval static bool is_remote(std::meta::info member) { return is_public(member) && is_function(member); }
 
   template <typename Service>
   consteval static std::meta::info make_proxy_member(std::meta::info proxy, int index, std::meta::info fnc) {
@@ -254,17 +271,20 @@ struct Annotated : Policy<Annotated> {
     }
 
     if (is_function(member)) {
-      return meta::has_annotation<annotations::CallbackTag>(member) || meta::has_annotation<annotations::Handler>(member);
+      return meta::has_annotation<annotations::CallbackTag>(member) ||
+             meta::has_annotation<annotations::Handler>(member);
     }
 
     if (is_function_template(member) && can_substitute(member, {})) {
+      // TODO must be static
+      // TODO must return message type
       return meta::has_annotation<annotations::Handler>(substitute(member, {}));
     }
     return false;
   }
 
   consteval static auto return_of(std::meta::info member) {
-    if (auto handler = annotation_of_type<annotations::Handler>(member); handler){
+    if (auto handler = annotation_of_type<annotations::Handler>(member); handler) {
       return return_type_of(handler->fnc);
     }
     return return_type_of(member);
@@ -278,10 +298,18 @@ struct Annotated : Policy<Annotated> {
     auto idx = std::meta::reflect_value(index);
     std::meta::info type;
     if (is_function(fnc)) {
-      type = substitute(^^FunctionProxy, {^^Service, idx, proxy, return_of(fnc)});
+      if (meta::has_annotation<annotations::Handler>(fnc)) {
+        type = substitute(^^CustomProxy, {^^Service, idx, proxy, return_of(fnc), reflect_value(fnc)});
+      } else {
+        type = substitute(^^FunctionProxy, {^^Service, idx, proxy, return_of(fnc)});
+      }
     } else {
       auto base = substitute(fnc, {});
-      type      = substitute(^^FunctionProxy, {^^Service, idx, proxy, return_of(base)});
+      if (!meta::has_annotation<annotations::Handler>(base)) {
+        return {};
+      }
+
+      type = substitute(^^CustomProxy, {^^Service, idx, proxy, return_of(base), reflect_value(fnc)});
     }
 
     return data_member_spec(type, {.name = identifier_of(fnc)});
@@ -291,12 +319,12 @@ struct Annotated : Policy<Annotated> {
   consteval static std::meta::info make_dispatch_member(int index, std::meta::info fnc) {
     auto idx = std::meta::reflect_value(index);
     if (is_function(fnc)) {
-      if (auto handler = annotation_of_type<annotations::Handler>(fnc); handler){
+      if (auto handler = annotation_of_type<annotations::Handler>(fnc); handler) {
         return substitute(^^CustomDispatcher, {reflect_value(handler->fnc), idx, ^^Protocol});
       }
       return substitute(^^FunctionDispatcher, {reflect_value(fnc), idx, ^^Protocol});
     } else {
-      auto base    = substitute(fnc, {});
+      auto base = substitute(fnc, {});
       if (auto handler = annotation_of_type<annotations::Handler>(base); handler) {
         return substitute(^^CustomDispatcher, {reflect_value(handler->fnc), idx, ^^Protocol});
       }

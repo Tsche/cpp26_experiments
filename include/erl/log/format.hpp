@@ -16,12 +16,36 @@
 namespace erl::logging {
 namespace impl {
 
+template <std::size_t N>
+auto unwrap(std::array<char, N> data){
+  // awful hack to get string literal arguments working
+  // TODO do proper safe deserialization
+  return data.data();
+}
+
+template <typename T>
+auto unwrap(T&& obj) {
+  return std::forward<T>(obj);
+}
+
+template <typename T>
+struct Replacements {
+  // default - already safe
+  using type = T;
+};
+
+template <typename T>
+using safe_type = typename Replacements<T>::type;
+
 template <util::fixed_string fmt_string, Location loc, typename... Args>
 impl::FormattingResult format(std::span<char const> data) {
-  auto fmt = std::format_string<Args...>{fmt_string};
+  auto fmt = std::format_string<std::remove_cvref_t<std::decay_t<Args>>&...>{fmt_string};
 
   auto reader  = message::MessageView{data};
-  return {.location = loc, .text=std::format(fmt, deserialize<Args>(reader)...)};
+  return [&](Args... args){
+    // TODO do proper safe deserialization
+    return impl::FormattingResult{.location = loc, .text=std::format(fmt, args...)};
+  }(unwrap(deserialize<Args>(reader))...);
 }
 
 template <typename... Args>
