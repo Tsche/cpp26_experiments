@@ -1,4 +1,4 @@
-s#pragma once
+#pragma once
 #include <stdexcept>
 
 namespace erl::rpc::_dispatch_impl {
