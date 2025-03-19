@@ -21,8 +21,7 @@ struct ThreadEventHelper {
   ThreadEventHelper& operator=(ThreadEventHelper&&)      = delete;
 };
 inline thread_local ThreadEventHelper const thread_helper{};
-}  // namespace impl
-
+}  // namespace _impl
 
 class LoggingService {
   std::vector<Sink*> sinks;
@@ -37,63 +36,53 @@ class LoggingService {
     }
   }
 
+  static LoggingEvent make_prelude(erl::logging::Severity severity, erl::logging::formatter_type formatter);
+
 public:
   using policy       = rpc::Annotated;
   using message_type = erl::message::HybridBuffer<58>;
   using protocol     = rpc::RPCProtocol<message_type>;
 
-  [[=rpc::callback]] void spawn(std::uint64_t thread);
-  [[=rpc::callback]] void exit(std::uint64_t thread);
-  [[=rpc::callback]] void rename(std::uint64_t thread, std::string_view name);
-  [[=rpc::callback]] void set_parent(std::uint64_t thread, std::uint64_t parent_id);
-  [[=rpc::callback]] void add_sink(Sink* sink);
-  [[=rpc::callback]] void remove_sink(Sink* sink);
+  [[= rpc::callback]] void spawn(std::uint64_t thread);
+  [[= rpc::callback]] void exit(std::uint64_t thread);
+  [[= rpc::callback]] void rename(std::uint64_t thread, std::string_view name);
+  [[= rpc::callback]] void set_parent(std::uint64_t thread, std::uint64_t parent_id);
+  [[= rpc::callback]] void add_sink(Sink* sink);
+  [[= rpc::callback]] void remove_sink(Sink* sink);
 
   template <typename... Args>
-  [[=rpc::handler(^^LoggingService::handle_print)]]
-  static auto print(erl::logging::Severity severity, 
-                    erl::logging::formatter_type formatter, 
-                    Args&&... args) {
+  [[= rpc::handler(^^LoggingService::handle_print)]] static auto print(erl::logging::Severity severity,
+                                                                       erl::logging::formatter_type formatter,
+                                                                       Args&&... args) {
     auto message   = message_type{};
-    auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
-    auto event     = LoggingEvent{.severity    = severity,
-                                  .thread      = erl::this_thread,
-                                  .timestamp   = timestamp,
-                                  .handler     = formatter};
-    serialize(event, message);
+    serialize(make_prelude(severity, formatter), message);
     (serialize(std::forward<Args>(args), message), ...);
     return message;
   }
 };
 
 class Logger {
-static auto& message_queue() {
-  static erl::EventQueue<erl::logging::LoggingService::message_type> queue{};
-  return queue;
-}
+  static auto& message_queue() {
+    static erl::EventQueue<erl::logging::LoggingService::message_type> queue{};
+    return queue;
+  }
 
 public:
-static auto handle_messages(){
-  auto server = message_queue().make_server();
-  auto service = LoggingService{};
-  server.run(service);
-}
+  static auto handle_messages() {
+    auto server  = message_queue().make_server();
+    auto service = LoggingService{};
+    server.run(service);
+  }
 
-static auto& client() {
-  static auto handle = message_queue().make_client();
-  static auto remote = erl::rpc::make_proxy<LoggingService>(&handle);
-  return remote;
-}
+  static auto& client() {
+    static auto handle = message_queue().make_client();
+    static auto remote = erl::rpc::make_proxy<LoggingService>(&handle);
+    return remote;
+  }
 
-static void shutdown() {
-  message_queue().make_client().kill();
-}
+  static void shutdown() { message_queue().make_client().kill(); }
 
-auto* operator->(){
-  return &client();
-}
-auto& operator*(){
-  return client();
-}
+  auto* operator->() { return &client(); }
+  auto& operator*() { return client(); }
 };
-}
+}  // namespace erl::logging

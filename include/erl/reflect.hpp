@@ -87,9 +87,7 @@ struct Reflect<T> {
   }
 
   static T deserialize(Deserializer auto& buffer) {
-    auto first  = erl::deserialize<first_type>(buffer);
-    auto second = erl::deserialize<second_type>(buffer);
-    return T(first, second);
+    return T{erl::deserialize<first_type>(buffer), erl::deserialize<second_type>(buffer)};
   }
 
   consteval static void hash_append(auto& hasher) {

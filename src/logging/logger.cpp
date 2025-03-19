@@ -3,6 +3,7 @@
 #include <erl/log/logger.hpp>
 #include <erl/log/message.hpp>
 #include <erl/net/message/reader.hpp>
+#include "erl/thread.hpp"
 
 namespace erl::logging {
 namespace _impl {
@@ -21,6 +22,11 @@ CachedThreadInfo LoggingService::thread_get_info(std::uint64_t thread) {
   }
   // todo generate if not found
   return {.id = thread};
+}
+
+LoggingEvent LoggingService::make_prelude(erl::logging::Severity severity, erl::logging::formatter_type formatter) {
+  auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
+  return {.severity = severity, .thread = erl::this_thread, .timestamp = timestamp, .handler = formatter};
 }
 
 void LoggingService::handle_print(std::span<char const> data) {
