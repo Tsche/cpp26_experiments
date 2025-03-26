@@ -56,7 +56,7 @@ struct LogFormat {
   consteval explicit(false) LogFormat(Tp const& str) {
     auto parser = formatting::FmtParser{str};
     auto fmt    = parser.transform(meta::get_member_names<formatter_impl::MessageArgs>());
-    format      = extract<formatter_impl::log_format_type>(substitute(^^formatter_impl::format, {meta::intern(fmt)}));
+    format      = extract<formatter_impl::log_format_type>(substitute(^^formatter_impl::format, {meta::promote(fmt)}));
   }
 
   std::string operator()(Message const& msg, std::string_view color = "") const {

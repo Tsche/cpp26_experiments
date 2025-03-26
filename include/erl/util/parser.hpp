@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <string_view>
 #include <cstddef>
 
@@ -7,6 +8,22 @@ namespace erl::util {
 constexpr bool is_whitespace(char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
+
+constexpr bool is_digit(char c) {
+  return c >= '0' && c <= '9';
+}
+
+constexpr bool is_integer(std::string_view str) {
+  if (str.empty()) {
+    return false;
+  }
+
+  if (str[0] == '-') {
+    str.remove_prefix(1);
+  }
+  return std::ranges::all_of(str, is_digit);
+}
+
 
 struct Parser {
   std::string_view data;

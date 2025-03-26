@@ -225,7 +225,7 @@ struct NamedFormatString {
   consteval explicit(false) NamedFormatString(Tp const& str) {
     auto parser = FmtParser{str};
     auto fmt    = parser.transform(meta::get_member_names<typename Args::type>());
-    format      = extract<format_type>(substitute(^^format_impl, {meta::intern(fmt), ^^Args}));
+    format      = extract<format_type>(substitute(^^format_impl, {meta::promote(fmt), ^^Args}));
   }
 };
 }  // namespace formatting

@@ -98,7 +98,7 @@ constexpr inline std::size_t member_count = nonstatic_data_members_of(^^T).size(
 template <char... Vs>
 constexpr inline auto static_string = util::fixed_string<sizeof...(Vs)>{Vs...};
 
-consteval auto intern(std::string_view str) {
+consteval auto promote(std::string_view str) {
   std::vector<std::meta::info> args;
   for (auto character : str) {
     args.push_back(std::meta::reflect_value(character));
@@ -111,7 +111,7 @@ constexpr inline T fixed_array[sizeof...(Vs)]{Vs...};
 
 template <std::ranges::input_range R>
   requires(!std::same_as<std::ranges::range_value_t<R>, char>)
-consteval auto intern(R&& iterable) {
+consteval auto promote(R&& iterable) {
   std::vector args = {^^std::ranges::range_value_t<R>};
   for (auto element : iterable) {
     args.push_back(std::meta::reflect_value(element));

@@ -5,6 +5,7 @@
 #include <ctime>
 #include <chrono>
 
+#include <erl/clock.hpp>
 #include <erl/thread.hpp>
 
 namespace erl::logging {
@@ -21,9 +22,7 @@ struct CachedThreadInfo {
   std::uint64_t parent = 0;
 };
 
-using timestamp_t = std::chrono::system_clock::time_point;
-
-enum Severity : std::uint8_t { TRACE, DEBUG, INFO, WARNING, ERROR, FATAL };
+enum Severity : std::uint8_t { TRACE, DEBUG, INFO, WARN, ERROR, FATAL };
 
 namespace impl {
   struct FormattingResult {
@@ -37,14 +36,14 @@ using formatter_type = impl::FormattingResult (*)(std::span<char const>);
 struct LoggingEvent {
   Severity severity;
   ThreadInfo thread;
-  long long timestamp;
+  timestamp_t timestamp;
   formatter_type handler;
 };
 
 struct Message {
   Severity severity;
   CachedThreadInfo thread;
-  timestamp_t timestamp;
+  timepoint_t timestamp;
   Location location;
 
   std::string text;

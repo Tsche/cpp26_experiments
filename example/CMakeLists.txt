@@ -8,6 +8,7 @@ endfunction()
 define_example(logging)
 define_example(args)
 define_example(rpc)
+define_example(format)
 
 add_library(demo_plugin SHARED "plugins/demo.cpp")
 target_link_libraries(demo_plugin PRIVATE erl)

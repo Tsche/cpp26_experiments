@@ -5,6 +5,7 @@
 #include <erl/net/message/buffer.hpp>
 #include <erl/rpc.hpp>
 #include <erl/rpc/proxy.hpp>
+#include <erl/clock.hpp>
 
 #include "sinks/sink.hpp"
 #include "message.hpp"
@@ -43,10 +44,10 @@ public:
   using message_type = erl::message::HybridBuffer<58>;
   using protocol     = rpc::RPCProtocol<message_type>;
 
-  [[= rpc::callback]] void spawn(std::uint64_t thread);
-  [[= rpc::callback]] void exit(std::uint64_t thread);
-  [[= rpc::callback]] void rename(std::uint64_t thread, std::string_view name);
-  [[= rpc::callback]] void set_parent(std::uint64_t thread, std::uint64_t parent_id);
+  [[= rpc::callback]] void spawn(timestamp_t timestamp, std::uint64_t thread);
+  [[= rpc::callback]] void exit(timestamp_t timestamp, std::uint64_t thread);
+  [[= rpc::callback]] void rename(timestamp_t timestamp, std::uint64_t thread, std::string_view name);
+  [[= rpc::callback]] void set_parent(timestamp_t timestamp, std::uint64_t thread, std::uint64_t parent_id);
   [[= rpc::callback]] void add_sink(Sink* sink);
   [[= rpc::callback]] void remove_sink(Sink* sink);
 

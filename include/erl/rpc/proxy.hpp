@@ -18,7 +18,7 @@ namespace erl::rpc {
 namespace annotations {
 struct Handler {
   std::meta::info fnc;
-  friend bool operator==(Handler const& self, std::optional<Handler> const& other) {
+  friend consteval bool operator==(Handler const& self, std::optional<Handler> const& other) {
     if (!other.has_value()) {
       return false;
     }

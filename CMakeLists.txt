@@ -14,6 +14,7 @@ target_compile_options(erl PUBLIC
   "-fannotation-attributes"
   "-fparameter-reflection"
   "-ftime-trace"
+  "-Wno-c++26-extensions"
   "-O0"
 )
 target_link_options(erl PUBLIC "-fexperimental-library" "-stdlib=libc++" "-lc++abi")

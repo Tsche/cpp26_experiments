@@ -35,7 +35,7 @@ struct ANSICodes;
 template <unsigned Code>
 struct ANSICode {
   static constexpr auto code  = Code;
-  static constexpr auto value = [:meta::intern(make_ansi_code(Code)):];
+  static constexpr auto value = [:meta::promote(make_ansi_code(Code)):];
 
   template <unsigned N>
   constexpr friend auto operator|(ANSICode self, ANSICode<N> const&) {
@@ -62,7 +62,7 @@ struct ANSICode {
 
 template <unsigned... Codes>
 struct ANSICodes {
-  static constexpr auto value = [:meta::intern(make_ansi_code(Codes...)):];
+  static constexpr auto value = [:meta::promote(make_ansi_code(Codes...)):];
 
   template <unsigned N>
   constexpr friend auto operator|(ANSICodes, ANSICode<N> const&) {

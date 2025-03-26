@@ -6,13 +6,13 @@
 #include <erl/thread.hpp>
 
 constexpr static auto message_format =
-    "[{timestamp:%H:%M:%S}] [{color}{level}{reset}] [{file_name}:{line}:{column}] {message}";
+    "[{timestamp:%H:%M:%S}] [{color}{level:>5}{reset}] [{file_name}:{line}:{column}] {message}";
 
 constexpr static auto colors = erl::color_map({
     {erl::logging::Severity::TRACE, erl::style::Reset},
     {erl::logging::Severity::DEBUG, erl::fg::Cyan},
     {erl::logging::Severity::INFO, erl::fg::Green},
-    {erl::logging::Severity::WARNING, erl::fg::Yellow},
+    {erl::logging::Severity::WARN, erl::fg::Yellow},
     {erl::logging::Severity::ERROR, erl::fg::Red},
     {erl::logging::Severity::FATAL, erl::fg::Red | erl::style::Bold}});
 
@@ -22,9 +22,7 @@ int main() {
   auto terminal = erl::logging::Terminal(message_format, Severity::TRACE, colors);
   Logger::client().add_sink(&terminal);
 
-  std::jthread _([&] {
-    Logger::handle_messages();
-  });
+  std::jthread _(Logger::handle_messages);
 
   erl::debug("boings");
   erl::log("bar");

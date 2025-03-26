@@ -34,4 +34,12 @@ constexpr std::string utos(unsigned value) {
   return {out.rbegin(), out.rend()};
 }
 
+constexpr unsigned stou(std::string_view str) {
+    unsigned result = 0;
+    for (char c : str) {
+        (result *= 10) += c - '0';
+    }
+    return result;
+}
+
 }  // namespace erl::util
