@@ -33,9 +33,6 @@ struct MessageArgs {
   std::uint32_t column;
 
   std::string message;
-
-  std::string_view color = "";
-  std::string_view reset = style::Reset;
 };
 
 using log_format_type = std::string (*)(MessageArgs const&);
@@ -49,15 +46,13 @@ std::string format(MessageArgs const& args) {
 }  // namespace formatter_impl
 
 struct LogFormat {
-  formatter_impl::log_format_type format;
+  using format_string = erl::NamedFormatString<formatter_impl::MessageArgs&>;
+  using format_type = format_string::format_type;
+  format_type format;
 
   template <typename Tp>
     requires std::convertible_to<Tp const&, std::string_view>
-  consteval explicit(false) LogFormat(Tp const& str) {
-    auto parser = formatting::FmtParser{str};
-    auto fmt    = parser.transform(meta::get_member_names<formatter_impl::MessageArgs>());
-    format      = extract<formatter_impl::log_format_type>(substitute(^^formatter_impl::format, {meta::promote(fmt)}));
-  }
+  consteval explicit(false) LogFormat(Tp const& str) : format(format_string(str).handle) {}
 
   std::string operator()(Message const& msg, std::string_view color = "") const {
     std::string level;
@@ -65,6 +60,10 @@ struct LogFormat {
       level = "INVALID";
     } else {
       level = meta::enumerator_names<Severity>[msg.severity];
+    }
+
+    if (!color.empty()) {
+      level = color + level + style::Reset;
     }
 
     using time_point = formatter_impl::MessageArgs::time_point;
@@ -82,7 +81,7 @@ struct LogFormat {
                                             .line      = msg.location.line,
                                             .column    = msg.location.column,
                                             .message   = msg.text,
-                                            .color     = color};
+                                            };
     return format(args);
   }
 };

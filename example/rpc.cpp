@@ -4,9 +4,10 @@
 #include <erl/log/sinks/terminal.hpp>
 #include <erl/log/format/color.hpp>
 #include <erl/thread.hpp>
-
-constexpr static auto message_format =
-    "[{timestamp:%H:%M:%S}] [{color}{level:>5}{reset}] [{file_name}:{line}:{column}] {message}";
+#include <erl/print.hpp>
+#include <erl/logging.hpp>
+constexpr static auto message_format = 
+  "[{timestamp:%H:%M:%S}] [{level:>5}] [{file_name}:{line}:{column}] {message}";
 
 constexpr static auto colors = erl::color_map({
     {erl::logging::Severity::TRACE, erl::style::Reset},
@@ -29,6 +30,9 @@ int main() {
   erl::warning("zoinks {}", -2);
   erl::error("foo {}", "oof");
   erl::fatal("oh no");
+  
+  auto local_logger = Logger{};
+  local_logger.spawn(0, 1234);
 
   Logger::shutdown();
 }

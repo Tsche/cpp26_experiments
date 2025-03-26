@@ -62,12 +62,17 @@ public:
   }
 };
 
-class Logger {
+namespace _impl {
+  using queue_type = erl::EventQueue<erl::logging::LoggingService::message_type>;
+}
+
+class Logger : public erl::rpc::Proxy<LoggingService, decltype(std::declval<_impl::queue_type>().make_client())> {
   static auto& message_queue() {
     static erl::EventQueue<erl::logging::LoggingService::message_type> queue{};
     return queue;
   }
 
+  using base = erl::rpc::Proxy<LoggingService, decltype(std::declval<_impl::queue_type>().make_client())>;
 public:
   static auto handle_messages() {
     auto server  = message_queue().make_server();
@@ -83,7 +88,6 @@ public:
 
   static void shutdown() { message_queue().make_client().kill(); }
 
-  auto* operator->() { return &client(); }
-  auto& operator*() { return client(); }
+  Logger() : base{client()} {}
 };
 }  // namespace erl::logging

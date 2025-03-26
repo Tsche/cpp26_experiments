@@ -8,17 +8,29 @@
 #include "string.hpp"
 
 namespace erl::meta {
+template <typename T>
+consteval T substitute_extract(std::meta::info target_template,
+                               std::same_as<std::meta::info> auto... template_arguments) {
+  return extract<T>(substitute(target_template, {template_arguments...}));
+}
+
+consteval bool has_trait(std::meta::info trait, std::same_as<std::meta::info> auto... template_arguments) {
+  return substitute_extract<bool>(trait, template_arguments...);
+}
+
 consteval auto member_functions_of(std::meta::info reflection) {
   return members_of(reflection) | std::views::filter(std::meta::is_public) |
          std::views::filter(std::meta::is_function) |
          std::views::filter(std::not_fn(std::meta::is_special_member_function)) |
          std::views::filter(std::not_fn(std::meta::is_conversion_function)) |
          std::views::filter(std::not_fn(std::meta::is_operator_function)) |
-         std::views::filter(std::not_fn(std::meta::is_static_member)) | std::ranges::to<std::vector>();
+         std::views::filter(std::not_fn(std::meta::is_static_member)) |
+         std::ranges::to<std::vector>();
 }
 
 consteval auto named_members_of(std::meta::info reflection) {
-  return members_of(reflection) | std::views::filter(std::meta::has_identifier) | std::ranges::to<std::vector>();
+  return members_of(reflection) | std::views::filter(std::meta::has_identifier) |
+         std::ranges::to<std::vector>();
 }
 
 consteval auto get_annotation(std::meta::info item, std::meta::info type) {
@@ -73,8 +85,19 @@ consteval std::meta::info get_nth_member(std::meta::info reflection, std::size_t
 
 template <typename T>
 consteval std::size_t get_member_index(std::string_view name) {
-  std::vector<std::string_view> names =
-      nonstatic_data_members_of(^^T) | std::views::transform(std::meta::identifier_of) | std::ranges::to<std::vector>();
+  std::vector<std::string_view> names = nonstatic_data_members_of(^^T) |
+                                        std::views::transform(std::meta::identifier_of) |
+                                        std::ranges::to<std::vector>();
+  if (auto it = std::ranges::find(names, name); it != names.end()) {
+    return std::distance(names.begin(), it);
+  }
+  return -1UZ;
+}
+
+consteval std::size_t get_member_index(std::meta::info type, std::string_view name) {
+  std::vector<std::string_view> names = nonstatic_data_members_of(type) |
+                                        std::views::transform(std::meta::identifier_of) |
+                                        std::ranges::to<std::vector>();
   if (auto it = std::ranges::find(names, name); it != names.end()) {
     return std::distance(names.begin(), it);
   }
@@ -137,8 +160,8 @@ template <auto... Elts>
 constexpr inline Replicator<Elts...> replicator{};
 
 template <std::size_t Idx, auto... Elts>
-constexpr auto get(Replicator<Elts...> const&){
-    return Elts...[Idx];
+constexpr auto get(Replicator<Elts...> const&) {
+  return Elts...[Idx];
 }
 }  // namespace impl
 
@@ -167,7 +190,8 @@ consteval auto sequence(unsigned maximum) {
 }
 
 template <typename T>
-constexpr inline auto enumerator_names = [:expand(enumerators_of(^^T)):] >> []<std::meta::info... Enumerators> {
+constexpr inline auto enumerator_names = [:expand(enumerators_of(
+                                               ^^T)):] >> []<std::meta::info... Enumerators> {
   return std::array{std::string_view{identifier_of(Enumerators)}...};
 };
 }  // namespace erl::meta
@@ -178,5 +202,5 @@ struct std::tuple_size<erl::meta::impl::Replicator<Elts...>>
 
 template <std::size_t Idx, auto... Elts>
 struct std::tuple_element<Idx, erl::meta::impl::Replicator<Elts...>> {
-    using type = decltype(Elts...[Idx]);
+  using type = decltype(Elts...[Idx]);
 };

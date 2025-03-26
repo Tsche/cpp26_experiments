@@ -2,25 +2,86 @@
 #include <format>
 #include <ranges>
 #include <cstdio>
+#include <source_location>
+#include <tuple>
 #include <utility>
 #include <type_traits>
+#include <vector>
 
 #include <erl/util/meta.hpp>
 #include <erl/util/containers.hpp>
 #include <erl/util/parser.hpp>
 #include <erl/util/string.hpp>
+#include <erl/util/concepts.hpp>
 
 #include <erl/compat/p1789.hpp>
 
-namespace erl::formatting {
+namespace erl::impl::_format_impl {
 
-template <std::size_t Idx, std::meta::info... Fields>
+struct Fragment {
+  constexpr virtual ~Fragment() {}
+  constexpr virtual void push(std::string&, int) = 0;
+};
+
+struct TextFragment final : Fragment {
+  std::string data;
+
+  consteval explicit TextFragment(std::string_view data) : data(data) {}
+  constexpr ~TextFragment() override = default;
+
+  constexpr void push(std::string& out, int) override { out += data; }
+};
+
+struct AccessorFragment final : Fragment {
+  unsigned index;
+
+  consteval explicit AccessorFragment(unsigned index) : index(index) {}
+  constexpr ~AccessorFragment() override = default;
+  constexpr void push(std::string& out, int direct_size) override {
+    // clamp to 0
+    auto value = std::max(direct_size + static_cast<int>(index), 0);
+
+    out += util::utos(static_cast<unsigned>(value));
+  }
+};
+
+struct Transformed {
+  std::string fmt;
+  std::meta::info direct_list = ^^void;
+  std::meta::info accessors   = ^^void;
+};
+
+template <std::meta::info Member>
+struct MemberAccessor {
+  template <typename T>
+  friend constexpr decltype(auto) operator>>(T&& obj, MemberAccessor) {
+    return std::forward_like<T>(std::forward<T>(obj).[:Member:]);
+  }
+};
+
+template <std::size_t Idx>
+struct SubscriptAccessor {
+  template <typename T>
+  friend constexpr decltype(auto) operator>>(T&& obj, SubscriptAccessor) {
+    return std::forward_like<T>(std::forward<T>(obj)[Idx]);
+  }
+};
+
+template <std::size_t Idx>
+struct TupleAccessor {
+  template <typename T>
+  friend constexpr decltype(auto) operator>>(T&& obj, TupleAccessor) {
+    return std::get<Idx>(std::forward<T>(obj));
+  }
+};
+
+template <std::size_t Idx, typename... Fields>
 struct Accessor {
   static constexpr std::size_t index = Idx;
 
   template <typename T>
   static constexpr decltype(auto) get(T&& obj) {
-    return (std::forward<T>(obj).*....*&[:Fields:]);
+    return (std::forward<T>(obj) >> ... >> Fields{});
   }
 };
 
@@ -38,98 +99,108 @@ std::string do_format(Args&&... args) {
   }
 }
 
-struct Fragment {
-  constexpr virtual ~Fragment() {}
-  constexpr virtual void push(std::string&, int) = 0;
-};
+class FormatParser : util::Parser {
+  std::source_location location;
+  std::vector<std::unique_ptr<Fragment>> fragments;
+  std::size_t fragment_start = 0;
 
-struct TextFragment final : Fragment {
-  std::string data;
+  [[nodiscard]] static consteval std::meta::info get_accessor(std::string_view expression,
+                                                              std::size_t index,
+                                                              std::meta::info type) {
+    std::vector accessors{std::meta::reflect_value(index)};
+    for (auto subfield : std::views::split(expression, '.')) {
+      type = remove_cvref(type);
+      std::meta::info accessor{};
 
-  consteval TextFragment(std::string_view data) : data(data) {}
-  constexpr ~TextFragment() override = default;
+      if (util::is_integer(std::string_view{subfield})) {
+        index = util::stou(std::string_view{subfield});
+        if (meta::has_trait(^^util::is_subscriptable, type)) {
+          // member access by subscript operator
+          type     = substitute(^^util::subscript_result, {type});
+          accessor = substitute(^^SubscriptAccessor, {std::meta::reflect_value(index)});
+        } else if (meta::has_trait(^^util::is_tuple_like, type)) {
+          // member access by get<Idx>(...)
+          type     = substitute(^^std::tuple_element_t, {std::meta::reflect_value(index), type});
+          accessor = substitute(^^TupleAccessor, {std::meta::reflect_value(index)});
+        } else {
+          // member access by index
+          auto member = meta::get_nth_member(type, index);
+          type        = type_of(member);
+          accessor    = substitute(^^MemberAccessor, {reflect_value(member)});
+        }
+      } else {
+        // member access by name
+        index       = meta::get_member_index(type, std::string_view{subfield});
+        auto member = meta::get_nth_member(type, index);
+        type        = type_of(member);
+        accessor    = substitute(^^MemberAccessor, {reflect_value(member)});
+      }
+      accessors.push_back(accessor);
+    }
 
-  constexpr void push(std::string& out, int) override { out += data; }
-};
-
-struct AccessorFragment final : Fragment {
-  unsigned index;
-
-  consteval AccessorFragment(unsigned index) : index(index) {}
-  constexpr ~AccessorFragment() override = default;
-  constexpr void push(std::string& out, int direct_size) override {
-    // clamp to 0
-    auto value = std::max(direct_size + static_cast<int>(index), 0);
-
-    out += util::utos(static_cast<unsigned>(value));
+    return substitute(^^Accessor, accessors);
   }
-};
 
-struct Transformed {
-  std::string fmt;
-  std::meta::info direct_list = ^^void;
-  std::meta::info accessors   = ^^void;
-};
+  consteval Transformed error(std::string_view message) {
+    auto line      = util::utos(location.line());
+    auto column    = util::utos(location.column() - 1);
+    auto error_str = std::string{"Invalid format string\n"};
 
-struct FormatString : util::Parser {
+    error_str += location.file_name();
+    error_str += ':';
+    error_str += line;
+    error_str += ':';
+    error_str += column;
+    error_str += ": error: ";
+    error_str += message;
+    error_str += '\n';
+
+    error_str += "  ";
+    error_str += line;
+    error_str += " | ";
+    error_str += data;
+    error_str += '\n';
+
+    auto offset = 5 + line.size();
+    error_str += std::string(offset, ' ');
+    error_str += std::string(fragment_start - 1, ' ');
+    error_str += '^';
+    if (auto highlight = cursor - fragment_start + 1; highlight > 0) {
+      error_str += std::string(highlight, '~');
+    }
+    error_str += '\n';
+    error_str += "raised from:";
+
+    return Transformed{error_str};
+  }
+
+  consteval auto push_text(std::string_view str = {}) {
+    if (!str.empty()) {
+      fragments.emplace_back(new TextFragment{str});
+    } else {
+      if (fragment_start == cursor) {
+        return;
+      }
+
+      fragments.emplace_back(
+          new TextFragment{data.substr(fragment_start, cursor - fragment_start)});
+    }
+    fragment_start = cursor;
+  };
+
+  consteval auto push_accessor(std::size_t index) {
+    fragments.emplace_back(new AccessorFragment(index));
+    fragment_start = cursor;
+  };
+
   template <typename... Args>
-  consteval Transformed transform(std::source_location const& location) {
+  consteval Transformed do_parse() {
     auto [... idx] = std::index_sequence_for<Args...>();
     int direct[sizeof...(Args)]{((void)idx, -1)...};
     unsigned used = 0;
 
-    std::meta::info arg_types[]{^^Args...};
-
     std::vector<std::meta::info> accessors;
-    std::vector<std::unique_ptr<Fragment>> fragments;
-    std::size_t fragment_start = 0;
-
-    auto push_text = [&](std::string str = "") {
-      if (!str.empty()) {
-        fragments.emplace_back(new TextFragment{str});
-      } else {
-        if (fragment_start == cursor) {
-          return;
-        }
-
-        fragments.emplace_back(
-            new TextFragment{data.substr(fragment_start, cursor - fragment_start)});
-      }
-      fragment_start = cursor;
-    };
-
-    auto error = [&](std::string_view message) {
-      auto line      = util::utos(location.line());
-      auto column    = util::utos(location.column() - 1);
-      auto error_str = std::string{"Invalid format string\n"};
-
-      error_str += location.file_name();
-      error_str += ':';
-      error_str += line;
-      error_str += ':';
-      error_str += column;
-      error_str += ": error: ";
-      error_str += message;
-      error_str += '\n';
-
-      error_str += "  ";
-      error_str += line;
-      error_str += " | ";
-      error_str += data;
-      error_str += '\n';
-
-      auto offset = 5 + line.size();
-      error_str += std::string(offset, ' ');
-      error_str += std::string(fragment_start - 1, ' ');
-      error_str += '^';
-      if (auto highlight = cursor - fragment_start + 1; highlight > 0) {
-        error_str += std::string(highlight, '~');
-      }
-      error_str += '\n';
-      error_str += "raised from:";
-
-      return Transformed{error_str};
-    };
+    std::meta::info arg_types[]{^^Args...};
 
     bool has_empty      = false;
     bool has_positional = false;
@@ -158,15 +229,16 @@ struct FormatString : util::Parser {
       if (start == cursor) {
         // no name
         has_empty = true;
-        if (has_empty && has_positional) {
+        if (has_positional) {
           return error("Either all or no arguments can be positional");
         }
+
         ++cursor;
         push_text();
         continue;
       } else {
         has_positional = true;
-        if (has_empty && has_positional) {
+        if (has_empty) {
           return error("Either all or no arguments can be positional");
         }
       }
@@ -175,48 +247,28 @@ struct FormatString : util::Parser {
       auto dot_pos = name.find('.');
 
       unsigned index = 0;
-      if (dot_pos == name.npos) {
-        if (util::is_integer(name)) {
-          // by-index field, ie. {0}
-          index = util::stou(name);
-          if (direct[index] == -1) {
-            direct[index] = used++;
-          }
-          push_text(util::utos(direct[index]));
-          continue;
-        } else {
-          // just a name -> implicit field 0
-          if constexpr (sizeof...(Args) != 1) {
-            return error("Field names cannot be directly used if there's more than one argument");
-          }
-          dot_pos = 0;
+      if (util::is_integer(name)) {
+        // by-index field, ie. {0}
+        index = util::stou(name);
+        if (direct[index] == -1) {
+          direct[index] = used++;
         }
+        push_text(util::utos(direct[index]));
+        continue;
+      } else if (dot_pos == name.npos || !util::is_digit(name[0])) {
+        // just a name -> implicit field 0
+        if constexpr (sizeof...(Args) != 1) {
+          return error("Field names cannot be directly used if there's more than one argument");
+        }
+        dot_pos = 0;
       } else {
         auto arg_index = name.substr(0, dot_pos);
         index          = util::stou(arg_index);
         ++dot_pos;
       }
 
-      std::vector indices{std::meta::reflect_value(index)};
-
-      auto field       = name.substr(dot_pos);
-      auto field_index = 0;
-      auto member      = std::meta::info{};
-      auto type        = arg_types[index];
-
-      for (auto subfield : std::views::split(field, '.')) {
-        field_index = extract<std::size_t (*)(std::string_view)>(
-            substitute(^^meta::get_member_index, {type}))(std::string_view{subfield});
-        member = meta::get_nth_member(type, field_index);
-        type   = type_of(member);
-
-        indices.push_back(std::meta::reflect_value(member));
-      }
-
-      accessors.push_back(substitute(^^Accessor, indices));
-
-      fragments.emplace_back(new AccessorFragment(accessors.size()));
-      fragment_start = cursor;
+      accessors.push_back(get_accessor(name.substr(dot_pos), index, arg_types[index]));
+      push_accessor(accessors.size());
       ++cursor;
     }
     push_text();
@@ -231,37 +283,29 @@ struct FormatString : util::Parser {
       direct_indices = {std::meta::reflect_value(idx)...};
     }
 
-    return Transformed{render(fragments, static_cast<int>(direct_indices.size()) - 1),
+    return Transformed{render(static_cast<int>(direct_indices.size()) - 1),
                        substitute(^^std::index_sequence, direct_indices),
                        substitute(^^util::TypeList, accessors)};
   }
 
-  [[nodiscard]] static constexpr std::string render(
-      std::vector<std::unique_ptr<Fragment>> const& fragments,
-      int accessor_offset) {
+public:
+  consteval FormatParser(std::string_view source, std::source_location const& location)
+      : util::Parser(source)
+      , location(location) {}
+
+  [[nodiscard]] constexpr std::string render(int accessor_offset) const {
     auto out = std::string{};
     for (auto&& fragment : fragments) {
       fragment->push(out, accessor_offset);
     }
     return out;
   }
-};
 
-template <typename... Args>
-struct NamedFormatString {
-  using format_type = std::string (*)(Args&&...);
-  format_type handle;
-
-  template <typename Tp>
-    requires std::convertible_to<Tp const&, std::string_view>
-  consteval explicit(false)
-      NamedFormatString(Tp const& str,
-                        std::source_location const& location = std::source_location::current()) {
-    auto parser                        = FormatString{str};
-    auto [fmt, direct_list, accessors] = parser.transform<std::remove_cvref_t<Args>...>(location);
-
-    handle = extract<format_type>(
-        substitute(^^do_format, {meta::promote(fmt), direct_list, accessors, ^^Args...}));
+  template <typename... Args>
+  static consteval auto parse(std::string_view source, std::source_location const& location) {
+    auto parser = FormatParser(source, location);
+    return parser.do_parse<Args...>();
   }
 };
-}  // namespace erl::formatting
+
+}  // namespace erl::impl::_format_impl
