@@ -9,13 +9,14 @@
 
 namespace erl::meta {
 template <typename T>
-consteval T substitute_extract(std::meta::info target_template,
-                               std::same_as<std::meta::info> auto... template_arguments) {
+consteval T instantiate(std::meta::info target_template,
+                        std::same_as<std::meta::info> auto... template_arguments) {
   return extract<T>(substitute(target_template, {template_arguments...}));
 }
 
-consteval bool has_trait(std::meta::info trait, std::same_as<std::meta::info> auto... template_arguments) {
-  return substitute_extract<bool>(trait, template_arguments...);
+consteval bool has_trait(std::meta::info trait,
+                         std::same_as<std::meta::info> auto... template_arguments) {
+  return instantiate<bool>(trait, template_arguments...);
 }
 
 consteval auto member_functions_of(std::meta::info reflection) {
@@ -24,7 +25,18 @@ consteval auto member_functions_of(std::meta::info reflection) {
          std::views::filter(std::not_fn(std::meta::is_special_member_function)) |
          std::views::filter(std::not_fn(std::meta::is_conversion_function)) |
          std::views::filter(std::not_fn(std::meta::is_operator_function)) |
+         std::ranges::to<std::vector>();
+}
+
+consteval auto nonstatic_member_functions_of(std::meta::info reflection) {
+  return member_functions_of(reflection) |
          std::views::filter(std::not_fn(std::meta::is_static_member)) |
+         std::ranges::to<std::vector>();
+}
+
+consteval auto static_member_functions_of(std::meta::info reflection) {
+  return member_functions_of(reflection) |
+         std::views::filter(std::meta::is_static_member) |
          std::ranges::to<std::vector>();
 }
 

@@ -229,7 +229,7 @@ struct DefaultPolicy : Policy<DefaultPolicy> {
   consteval static std::meta::info make_proxy_member(std::meta::info proxy, int index, std::meta::info fnc) {
     auto idx  = std::meta::reflect_value(index);
     auto type = substitute(^^FunctionProxy, {^^Service, idx, proxy, return_type_of(fnc)});
-    return data_member_spec(type, {.name = identifier_of(fnc)});
+    return data_member_spec(type, {.name = identifier_of(fnc), .no_unique_address=true});
   }
 
   template <typename Service, typename Protocol>
@@ -254,7 +254,7 @@ struct InProcess : Policy<InProcess> {
   consteval static std::meta::info make_proxy_member(std::meta::info proxy, int index, std::meta::info fnc) {
     auto idx             = std::meta::reflect_value(index);
     std::meta::info type = substitute(^^FunctionTemplateProxy, {reflect_value(fnc), idx, proxy});
-    return data_member_spec(type, {.name = identifier_of(fnc)});
+    return data_member_spec(type, {.name = identifier_of(fnc), .no_unique_address=true});
   }
 
   template <typename Service, typename Protocol>
@@ -312,7 +312,7 @@ struct Annotated : Policy<Annotated> {
       type = substitute(^^CustomProxy, {^^Service, idx, proxy, return_of(base), reflect_value(fnc)});
     }
 
-    return data_member_spec(type, {.name = identifier_of(fnc)});
+    return data_member_spec(type, {.name = identifier_of(fnc), .no_unique_address=true});
   }
 
   template <typename Service, typename Protocol>

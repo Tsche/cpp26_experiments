@@ -7,7 +7,9 @@ template <typename... Ts>
 struct Tuple {
   struct Storage;
 
-  static_assert(is_type(define_aggregate(^^Storage, {data_member_spec(^^Ts)...})));
+  consteval {
+    define_aggregate(^^Storage, {data_member_spec(^^Ts)...});
+  }
   Storage data;
 
   Tuple() : data{} {}

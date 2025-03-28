@@ -34,5 +34,7 @@ int main() {
   auto local_logger = Logger{};
   local_logger.spawn(0, 1234);
 
+  erl::println("size: {}", sizeof(Logger::client()));
+
   Logger::shutdown();
 }
