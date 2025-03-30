@@ -3,6 +3,8 @@
 
 struct Args : erl::clap {
   std::string text;
+  
+  [[=expect(value < 10)]] 
   int times = 5;
 
   [[= option]] 

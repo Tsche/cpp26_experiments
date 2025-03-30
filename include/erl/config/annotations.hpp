@@ -25,4 +25,16 @@ struct Shorthand : StringAnnotation {
 struct Description : StringAnnotation {
     using StringAnnotation::StringAnnotation;
 };
+
+template <typename T>
+struct Expect {
+  T condition;
+};
+
+struct {
+  consteval auto operator()(auto expr) const {
+    return Expect{expr};
+  }
+} constexpr inline expect{};
+
 }  // namespace erl::annotations

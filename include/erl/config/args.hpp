@@ -10,6 +10,7 @@
 
 #include "default_construct.hpp"
 #include "annotations.hpp"
+#include "erl/config/expect.hpp"
 
 namespace erl {
 template <typename T>
@@ -31,8 +32,8 @@ void check_default_initializable(ArgumentTuple<T> const& arguments) {
   }
 }
 
-template <typename T>
-struct ArgParser;
+// template <typename T>
+// struct ArgParser;
 
 template <typename T>
 struct Argument {
@@ -50,26 +51,26 @@ struct Argument {
     }
 
     template <std::size_t Idx>
-    bool do_parse(ArgParser<T>& parser) {
+    bool do_parse(std::span<std::string_view> args, std::size_t& cursor) {
       static constexpr auto current_handler =
           meta::instantiate<handler_type>(^^do_handle, std::meta::reflect_value(Idx));
 
-      if (parser.cursor >= parser.args.size()) {
+      if (cursor >= args.size()) {
         return false;
       }
 
-      if (parser.args[parser.cursor][0] == '-') {
+      if (args[cursor][0] == '-') {
         // TODO check if int
         return false;
       }
 
-      argument = parser.args[parser.cursor];
+      argument = args[cursor];
       handle   = current_handler;
       return true;
     }
   };
 
-  using parser_type  = bool (Unevaluated::*)(ArgParser<T>&);
+  using parser_type  = bool (Unevaluated::*)(std::span<std::string_view>, std::size_t&);
   using default_type = void (*)(ArgumentTuple<T> const&);
   parser_type parse;
   default_type check_default;
@@ -125,28 +126,28 @@ struct Option {
     }
 
     template <util::fixed_string name, std::meta::info R>
-    bool do_parse(ArgParser<T>& parser) {
+    bool do_parse(std::span<std::string_view> args, std::size_t& cursor) {
       static constexpr auto current_handler = make_handler(R);
 
       // TODO flags
       constexpr static auto parameter_count =
           is_object_type(type_of(R)) ? 1 : parameters_of(R).size();
 
-      auto arg_name = parser.args[parser.cursor];
+      auto arg_name = args[cursor];
       arg_name.remove_prefix(2);
       if (arg_name != name) {
         return false;
       }
 
       for (int idx = 0; idx < parameter_count; ++idx) {
-        if (parser.cursor >= parser.args.size()) {
+        if (cursor >= args.size()) {
           // if (!std::meta::has_default_argument(param)){
           //   // TODO error
           //   return false;
           // }
           return false;
         }
-        arguments.push_back(parser.args[++parser.cursor]);
+        arguments.push_back(args[++cursor]);
       }
 
       handle = current_handler;
@@ -154,7 +155,7 @@ struct Option {
     }
   };
 
-  using parser_type = bool (Unevaluated::*)(ArgParser<T>&);
+  using parser_type = bool (Unevaluated::*)(std::span<std::string_view>, std::size_t&);
 
   parser_type parse;
   char const* name;
@@ -280,6 +281,10 @@ public:
 
 struct clap {
   static constexpr annotations::Option option;
+  static constexpr auto expect = annotations::expect;
+  static constexpr auto value = _expect_impl::Placeholder<0>{};
+  static constexpr auto lazy = _expect_impl::LazyProxy{};
+
   using shorthand   = annotations::Shorthand;
   using description = annotations::Description;
 
@@ -323,84 +328,62 @@ struct clap {
 };
 
 template <typename T>
-struct ArgParser {
+T parse_args(std::vector<std::string_view> args) {
   static constexpr Spec<T> spec{};
-  std::span<std::string_view> args;
-  std::size_t cursor = 0;
+
+  Program::set_name(args[0]);
+  std::size_t cursor = 1;
 
   std::vector<typename Argument<T>::Unevaluated> parsed_args{};
+  for (auto Arg : spec.arguments) {
+    typename Argument<T>::Unevaluated argument{};
+    if ((argument.*Arg.parse)(args, cursor)) {
+      parsed_args.push_back(argument);
+      ++cursor;
+    } else {
+      break;
+    }
+  }
+
   std::vector<typename Option<T>::Unevaluated> parsed_opts{};
+  auto [... Cmds] = [:meta::expand(spec.commands):];
+  auto [... Opts] = [:meta::expand(spec.options):];
 
-  void parse_arguments() {
-    for (auto Arg : spec.arguments) {
-      typename Argument<T>::Unevaluated argument;
-      if ((argument.*Arg.parse)(*this)) {
-        parsed_args.push_back(argument);
-        ++cursor;
-      } else {
-        break;
-      }
+  for (; cursor < args.size(); ++cursor) {
+    bool found = false;
+    typename Option<T>::Unevaluated option{};
+
+    if (((option.*Cmds.parse)(args, cursor) || ...)) {
+      // run commands right away
+      option(nullptr);
+      continue;
     }
+
+    found = ((option.*Opts.parse)(args, cursor) || ...);
+    if (!found) {
+      std::println("Could not find option {}", args[cursor]);
+      std::exit(1);
+    }
+    parsed_opts.push_back(option);
   }
 
-  void parse_options() {
-    auto [... Cmds] = [:meta::expand(spec.commands):];
-    auto [... Opts] = [:meta::expand(spec.options):];
-
-    for (; cursor < args.size(); ++cursor) {
-      bool found = false;
-      typename Option<T>::Unevaluated option{};
-
-      if (((option.*Cmds.parse)(*this) || ...)) {
-        // run commands right away
-        option(nullptr);
-        continue;
-      }
-
-      found = ((option.*Opts.parse)(*this) || ...);
-      if (!found) {
-        std::println("Could not find option {}", args[cursor]);
-        std::exit(1);
-      }
-      parsed_opts.push_back(option);
-    }
+  ArgumentTuple<T> args_tuple;
+  for (auto argument : parsed_args) {
+    argument(args_tuple);
   }
 
-  T evaluate_arguments(){
-    ArgumentTuple<T> args_tuple;
-    for (auto argument : parsed_args) {
-      argument(args_tuple);
-    }
+  for (auto Arg : spec.arguments | std::views::drop(parsed_args.size())) {
+    // default args
+    Arg.check_default(args_tuple);
+  }
+  T object = default_construct<T>(args_tuple);
 
-    for (auto Arg : spec.arguments | std::views::drop(parsed_args.size())) {
-      // default args
-      Arg.check_default(args_tuple);
-    }
-
-    return default_construct<T>(args_tuple);
+  // run options
+  for (auto&& option : parsed_opts) {
+    option(&object);
   }
 
-  T parse() {
-    Program::set_name(args[0]);
-    cursor = 1;
-
-    parse_arguments();
-    parse_options();
-
-    T object = evaluate_arguments();
-
-    // run options
-    for (auto&& option : parsed_opts) {
-      option(&object);
-    }
-
-    return object;
-  }
-};
-
-template <typename T>
-T parse_args(std::vector<std::string_view> args) {
-  return ArgParser<T>(args).parse();
+  return object;
 }
 
 }  // namespace erl
