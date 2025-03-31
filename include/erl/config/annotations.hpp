@@ -27,9 +27,7 @@ struct Description : StringAnnotation {
 };
 
 template <typename T>
-struct Expect {
-  T condition;
-};
+struct Expect : T {};
 
 struct {
   consteval auto operator()(auto expr) const {

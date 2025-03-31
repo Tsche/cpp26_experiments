@@ -4,13 +4,15 @@
 #include <cstdio>
 #include <print>
 #include <ranges>
-#include <erl/util/meta.hpp>
 #include <utility>
 #include <filesystem>
 
 #include "default_construct.hpp"
 #include "annotations.hpp"
-#include "erl/config/expect.hpp"
+#include "expect.hpp"
+
+#include <erl/util/meta.hpp>
+#include <erl/log/format/color.hpp>
 
 namespace erl {
 template <typename T>
@@ -24,16 +26,46 @@ T parse_value(std::string_view value) {
   }
 }
 
+struct ArgParser {
+  std::span<std::string_view> args;
+  std::size_t cursor = 0;
+
+  std::string_view current() const { return args[cursor]; }
+
+  template <typename... Args>
+  [[noreturn]] void fail(std::format_string<Args...> fmt, Args&&... args) const {
+    std::println(fmt, std::forward<Args>(args)...);
+    std::exit(1);
+  }
+
+  bool valid() const { return cursor < args.size(); }
+};
+
 template <typename T, std::size_t Idx>
-void check_default_initializable(ArgumentTuple<T> const& arguments) {
+void check_default_initializable(ArgParser const& parser, ArgumentTuple<T> const& arguments) {
   constexpr static auto member = nonstatic_data_members_of(^^T)[Idx];
   if constexpr (!has_default_member_initializer(member)) {
-    throw std::out_of_range(std::format("Missing required argument: {}", identifier_of(member)));
+    parser.fail("Missing required argument: {}", identifier_of(member));
   }
 }
 
-// template <typename T>
-// struct ArgParser;
+template <std::meta::info R, typename T>
+void validate(T value) {
+  if constexpr (erl::meta::has_annotation(R, ^^erl::annotations::Expect)) {
+    constexpr static auto constraint = [:value_of(erl::meta::get_annotation(R, ^^erl::annotations::Expect)):];
+    
+    std::vector<std::string> failed_terms;
+    if (constraint.eval_verbose(erl::Tuple{value}, failed_terms)) {
+      return;
+    }
+    
+    std::println("Validation failed for argument `{}`", identifier_of(R));
+    for (auto&& term : failed_terms | std::views::reverse) {
+      std::println("    => {}{}{} evaluated to {}false{}", fg::Blue, term, style::Reset, fg::Red, style::Reset);
+    }
+    std::exit(1);
+  }
+}
 
 template <typename T>
 struct Argument {
@@ -44,34 +76,38 @@ struct Argument {
     handler_type handle;
     void operator()(ArgumentTuple<T>& args) const { (this->*handle)(args); }
 
-    template <std::size_t Idx>
+    template <std::size_t Idx, std::meta::info R>
     void do_handle(ArgumentTuple<T>& arguments) const {
-      using type          = [:type_of(nonstatic_data_members_of(^^T)[Idx]):];
-      get<Idx>(arguments) = parse_value<type>(argument);
+      using type = [:type_of(nonstatic_data_members_of(^^T)[Idx]):];
+      auto value = parse_value<type>(argument);
+      validate<R>(value);
+      get<Idx>(arguments) = value;
     }
 
-    template <std::size_t Idx>
-    bool do_parse(std::span<std::string_view> args, std::size_t& cursor) {
+    template <std::size_t Idx, std::meta::info R>
+    bool do_parse(ArgParser& parser) {
       static constexpr auto current_handler =
-          meta::instantiate<handler_type>(^^do_handle, std::meta::reflect_value(Idx));
+          meta::instantiate<handler_type>(^^do_handle,
+                                          std::meta::reflect_value(Idx),
+                                          reflect_value(R));
 
-      if (cursor >= args.size()) {
+      if (!parser.valid()) {
         return false;
       }
 
-      if (args[cursor][0] == '-') {
+      if (parser.current()[0] == '-') {
         // TODO check if int
         return false;
       }
 
-      argument = args[cursor];
+      argument = parser.current();
       handle   = current_handler;
       return true;
     }
   };
 
-  using parser_type  = bool (Unevaluated::*)(std::span<std::string_view>, std::size_t&);
-  using default_type = void (*)(ArgumentTuple<T> const&);
+  using parser_type  = bool (Unevaluated::*)(ArgParser&);
+  using default_type = void (*)(ArgParser const&, ArgumentTuple<T> const&);
   parser_type parse;
   default_type check_default;
   bool optional = false;
@@ -80,7 +116,8 @@ struct Argument {
 
   consteval Argument(std::size_t idx, std::meta::info reflection)
       : parse(meta::instantiate<parser_type>(^^Unevaluated::template do_parse,
-                                             std::meta::reflect_value(idx)))
+                                             std::meta::reflect_value(idx),
+                                             reflect_value(reflection)))
       , check_default(meta::instantiate<default_type>(^^check_default_initializable,
                                                       ^^T,
                                                       std::meta::reflect_value(idx)))
@@ -126,28 +163,24 @@ struct Option {
     }
 
     template <util::fixed_string name, std::meta::info R>
-    bool do_parse(std::span<std::string_view> args, std::size_t& cursor) {
+    bool do_parse(ArgParser& parser) {
       static constexpr auto current_handler = make_handler(R);
 
       // TODO flags
       constexpr static auto parameter_count =
           is_object_type(type_of(R)) ? 1 : parameters_of(R).size();
 
-      auto arg_name = args[cursor];
+      auto arg_name = parser.current();
       arg_name.remove_prefix(2);
       if (arg_name != name) {
         return false;
       }
 
-      for (int idx = 0; idx < parameter_count; ++idx) {
-        if (cursor >= args.size()) {
-          // if (!std::meta::has_default_argument(param)){
-          //   // TODO error
-          //   return false;
-          // }
-          return false;
+      for (unsigned idx = 0; idx < parameter_count; ++idx) {
+        if (!parser.valid()) {
+          parser.fail("Missing argument {} of option {}", idx, arg_name);
         }
-        arguments.push_back(args[++cursor]);
+        arguments.push_back(parser.args[++parser.cursor]);
       }
 
       handle = current_handler;
@@ -155,7 +188,7 @@ struct Option {
     }
   };
 
-  using parser_type = bool (Unevaluated::*)(std::span<std::string_view>, std::size_t&);
+  using parser_type = bool (Unevaluated::*)(ArgParser&);
 
   parser_type parse;
   char const* name;
@@ -282,8 +315,8 @@ public:
 struct clap {
   static constexpr annotations::Option option;
   static constexpr auto expect = annotations::expect;
-  static constexpr auto value = _expect_impl::Placeholder<0>{};
-  static constexpr auto lazy = _expect_impl::LazyProxy{};
+  static constexpr auto value  = _expect_impl::Placeholder<0>{};
+  static constexpr auto lazy   = _expect_impl::LazyProxy{};
 
   using shorthand   = annotations::Shorthand;
   using description = annotations::Description;
@@ -296,9 +329,9 @@ struct clap {
     std::string arguments{};
     for (auto argument : spec.arguments) {
       if (argument.optional) {
-        arguments += std::format("[{}: {}] ", argument.name, argument.type);
+        arguments += std::format("[{}] ", argument.name);
       } else {
-        arguments += std::format("{}: {} ", argument.name, argument.type);
+        arguments += std::format("{} ", argument.name);
       }
     }
     std::println("usage: {} {}", program_name, arguments);
@@ -328,16 +361,18 @@ struct clap {
 };
 
 template <typename T>
-T parse_args(std::vector<std::string_view> args) {
+T parse_args(std::vector<std::string_view> args_in) {
   static constexpr Spec<T> spec{};
+  auto parser          = ArgParser{args_in};
+  auto& [args, cursor] = parser;
 
   Program::set_name(args[0]);
-  std::size_t cursor = 1;
+  cursor = 1;
 
   std::vector<typename Argument<T>::Unevaluated> parsed_args{};
   for (auto Arg : spec.arguments) {
     typename Argument<T>::Unevaluated argument{};
-    if ((argument.*Arg.parse)(args, cursor)) {
+    if ((argument.*Arg.parse)(parser)) {
       parsed_args.push_back(argument);
       ++cursor;
     } else {
@@ -349,22 +384,22 @@ T parse_args(std::vector<std::string_view> args) {
   auto [... Cmds] = [:meta::expand(spec.commands):];
   auto [... Opts] = [:meta::expand(spec.options):];
 
-  for (; cursor < args.size(); ++cursor) {
+  while (parser.valid()) {
     bool found = false;
     typename Option<T>::Unevaluated option{};
 
-    if (((option.*Cmds.parse)(args, cursor) || ...)) {
+    if (((option.*Cmds.parse)(parser) || ...)) {
       // run commands right away
       option(nullptr);
       continue;
     }
 
-    found = ((option.*Opts.parse)(args, cursor) || ...);
+    found = ((option.*Opts.parse)(parser) || ...);
     if (!found) {
-      std::println("Could not find option {}", args[cursor]);
-      std::exit(1);
+      parser.fail("Could not find option {}", parser.current());
     }
     parsed_opts.push_back(option);
+    ++cursor;
   }
 
   ArgumentTuple<T> args_tuple;
@@ -374,7 +409,7 @@ T parse_args(std::vector<std::string_view> args) {
 
   for (auto Arg : spec.arguments | std::views::drop(parsed_args.size())) {
     // default args
-    Arg.check_default(args_tuple);
+    Arg.check_default(parser, args_tuple);
   }
   T object = default_construct<T>(args_tuple);
 
