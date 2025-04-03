@@ -52,20 +52,52 @@ void check_default_initializable(ArgParser const& parser, ArgumentTuple<T> const
 template <std::meta::info R, typename T>
 void validate(T value) {
   if constexpr (erl::meta::has_annotation(R, ^^erl::annotations::Expect)) {
-    constexpr static auto constraint = [:value_of(erl::meta::get_annotation(R, ^^erl::annotations::Expect)):];
-    
+    constexpr static auto constraint = [:value_of(erl::meta::get_annotation(
+                                             R,
+                                             ^^erl::annotations::Expect)):];
+
     std::vector<std::string> failed_terms;
     if (constraint.eval_verbose(erl::Tuple{value}, failed_terms)) {
       return;
     }
-    
+
     std::println("Validation failed for argument `{}`", identifier_of(R));
     for (auto&& term : failed_terms | std::views::reverse) {
-      std::println("    => {}{}{} evaluated to {}false{}", fg::Blue, term, style::Reset, fg::Red, style::Reset);
+      std::println("    => {}{}{} evaluated to {}false{}",
+                   fg::Blue,
+                   term,
+                   style::Reset,
+                   fg::Red,
+                   style::Reset);
     }
     std::exit(1);
   }
 }
+
+struct ArgumentInfo {
+  char const* name;
+  char const* type;
+  char const* description;
+  bool optional = false;
+  std::size_t constraint_count;
+  char const* const* constraints;
+
+  explicit consteval ArgumentInfo(std::meta::info reflection)
+      : name(std::meta::define_static_string(identifier_of(reflection)))
+      , type(std::meta::define_static_string(
+            display_string_of(type_of(reflection))))  // TODO clean at this point?
+      , optional(is_function_parameter(reflection) ? has_default_argument(reflection)
+                                                   : has_default_member_initializer(reflection)) {
+    if (auto desc = annotation_of_type<annotations::Description>(reflection); desc) {
+      description = desc->data;
+    } else {
+      description = std::meta::define_static_string("");
+    }
+
+    constraint_count = 0;
+    constraints      = nullptr;  // std::meta::define_static_array(std::vector{""}).data();
+  }
+};
 
 template <typename T>
 struct Argument {
@@ -95,35 +127,39 @@ struct Argument {
         return false;
       }
 
-      if (parser.current()[0] == '-') {
-        // TODO check if int
+      auto current = parser.current();
+      if (current[0] == '-') {
+        if (current.size() > 1 && current[1] >= '0' && current[1] <= '9') {
+          ++parser.cursor;
+          return true;
+        }
         return false;
       }
 
-      argument = parser.current();
+      argument = current;
       handle   = current_handler;
+      ++parser.cursor;
       return true;
     }
   };
 
   using parser_type  = bool (Unevaluated::*)(ArgParser&);
   using default_type = void (*)(ArgParser const&, ArgumentTuple<T> const&);
+
+  std::size_t index;
   parser_type parse;
   default_type check_default;
-  bool optional = false;
-  char const* type;
-  char const* name;
+  ArgumentInfo info;
 
   consteval Argument(std::size_t idx, std::meta::info reflection)
-      : parse(meta::instantiate<parser_type>(^^Unevaluated::template do_parse,
+      : index(idx)
+      , parse(meta::instantiate<parser_type>(^^Unevaluated::template do_parse,
                                              std::meta::reflect_value(idx),
                                              reflect_value(reflection)))
       , check_default(meta::instantiate<default_type>(^^check_default_initializable,
                                                       ^^T,
                                                       std::meta::reflect_value(idx)))
-      , optional(has_default_member_initializer(reflection))
-      , type(std::meta::define_static_string(display_string_of(type_of(reflection))))
-      , name(std::meta::define_static_string(identifier_of(reflection))) {}
+      , info(reflection) {}
 };
 
 template <typename T>
@@ -162,21 +198,17 @@ struct Option {
       return extract<handler_type>(substitute(^^do_handle, args));
     }
 
-    template <util::fixed_string name, std::meta::info R>
+    template <util::fixed_string name, std::meta::info R, Argument<T>... args>
     bool do_parse(ArgParser& parser) {
       static constexpr auto current_handler = make_handler(R);
-
-      // TODO flags
-      constexpr static auto parameter_count =
-          is_object_type(type_of(R)) ? 1 : parameters_of(R).size();
-
-      auto arg_name = parser.current();
+      auto arg_name                         = parser.current();
       arg_name.remove_prefix(2);
       if (arg_name != name) {
         return false;
       }
+      ++parser.cursor;
 
-      for (unsigned idx = 0; idx < parameter_count; ++idx) {
+      for (unsigned idx = 0; idx < sizeof...(args); ++idx) {
         if (!parser.valid()) {
           parser.fail("Missing argument {} of option {}", idx, arg_name);
         }
@@ -194,33 +226,39 @@ struct Option {
   char const* name;
   char const* description = nullptr;
 
-  std::size_t argument_size;
-  char const* const* argument_types;
-  char const* const* argument_names;
+  std::size_t argument_count;
+  ArgumentInfo const* arguments;
 
   consteval Option(std::string_view name, std::meta::info reflection)
-      : parse(meta::instantiate<parser_type>(^^Unevaluated::template do_parse,
-                                             meta::promote(name),
-                                             reflect_value(reflection)))
-      , name(std::meta::define_static_string(name)) {
+      : name(std::meta::define_static_string(name)) {
     if (auto desc = annotation_of_type<annotations::Description>(reflection); desc) {
       description = desc->data;
     }
 
-    std::vector<char const*> types;
-    std::vector<char const*> names;
+    std::vector<Argument<T>> args;
+    std::size_t index = 0;
     if (is_object_type(type_of(reflection))) {
-      types.push_back(std::meta::define_static_string(display_string_of(type_of(reflection))));
-      names.push_back(std::meta::define_static_string(identifier_of(reflection)));
+      args.emplace_back(index, reflection);
     } else {
       for (auto param : parameters_of(reflection)) {
-        types.push_back(std::meta::define_static_string(display_string_of(type_of(param))));
-        names.push_back(std::meta::define_static_string(identifier_of(param)));
+        args.emplace_back(index++, param);
       }
     }
-    argument_size  = names.size();
-    argument_types = std::meta::define_static_array(types).data();
-    argument_names = std::meta::define_static_array(names).data();
+
+    std::vector<ArgumentInfo> arg_infos;
+    for (auto arg : args) {
+      arg_infos.push_back(arg.info);
+    }
+
+    argument_count = args.size();
+    arguments      = std::meta::define_static_array(arg_infos).data();
+
+    std::vector parse_args = {meta::promote(name), reflect_value(reflection)};
+    for (auto arg : args) {
+      parse_args.push_back(std::meta::reflect_value(arg));
+    }
+
+    parse = extract<parser_type>(substitute(^^Unevaluated::template do_parse, parse_args));
   }
 };
 
@@ -328,10 +366,10 @@ struct clap {
     auto program_name = Program::name();
     std::string arguments{};
     for (auto argument : spec.arguments) {
-      if (argument.optional) {
-        arguments += std::format("[{}] ", argument.name);
+      if (argument.info.optional) {
+        arguments += std::format("[{}] ", argument.info.name);
       } else {
-        arguments += std::format("{} ", argument.name);
+        arguments += std::format("{} ", argument.info.name);
       }
     }
     std::println("usage: {} {}", program_name, arguments);
@@ -339,8 +377,8 @@ struct clap {
 
     auto print_option = [](auto opt) {
       std::string params;
-      for (std::size_t idx = 0; idx < opt.argument_size; ++idx) {
-        params += std::format("{}[{}] ", opt.argument_names[idx], opt.argument_types[idx]);
+      for (std::size_t idx = 0; idx < opt.argument_count; ++idx) {
+        params += std::format("{}[{}] ", opt.arguments[idx].name, opt.arguments[idx].type);
       }
 
       std::println("--{} {}", opt.name, params);
@@ -374,7 +412,6 @@ T parse_args(std::vector<std::string_view> args_in) {
     typename Argument<T>::Unevaluated argument{};
     if ((argument.*Arg.parse)(parser)) {
       parsed_args.push_back(argument);
-      ++cursor;
     } else {
       break;
     }
@@ -399,7 +436,6 @@ T parse_args(std::vector<std::string_view> args_in) {
       parser.fail("Could not find option {}", parser.current());
     }
     parsed_opts.push_back(option);
-    ++cursor;
   }
 
   ArgumentTuple<T> args_tuple;

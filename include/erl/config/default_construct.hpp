@@ -11,17 +11,34 @@
 namespace erl {
 struct clap;
 
+consteval std::meta::info make_arg_tuple(std::meta::info reflection) {
+  std::vector<std::meta::info> args;
+  if (is_function_type(reflection)) {
+    for (auto& arg : parameters_of(reflection)) {
+      // turns out parameters_of of a reflection of a function type
+      // returns a reflection of a type, not a reflection of a parameter
+      args.push_back(arg);
+    }
+  } else if (is_type(reflection)) {
+    for (auto& arg : nonstatic_data_members_of(reflection)) {
+      args.push_back(type_of(arg));
+    }
+  } else {
+    return {};
+  }
+
+  return substitute(^^erl::Tuple, args | std::views::transform([](auto r) {
+                                    return substitute(^^std::optional, {r});
+                                  }));
+}
+
 template <typename T>
-using ArgumentTuple = [:substitute(
-                            ^^erl::Tuple,
-                            nonstatic_data_members_of(^^T) | std::views::transform([](auto r) {
-                              return substitute(^^std::optional, {type_of(r)});
-                            })):];
+using ArgumentTuple = [:make_arg_tuple(^^T):];
 
 namespace _default_construct_impl {
 #define $generate_case(Idx)                            \
   case (Idx):                                          \
-    if constexpr ((Idx) <= size) {                      \
+    if constexpr ((Idx) <= size) {                     \
       return visitor(std::make_index_sequence<Idx>()); \
     }                                                  \
     std::unreachable();
@@ -70,7 +87,7 @@ template <typename T>
 T default_construct(ArgumentTuple<T> const& args) {
   return _default_construct_impl::visit<T>(
       [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        if constexpr (std::derived_from<T, clap>){
+        if constexpr (std::derived_from<T, clap>) {
           return T{{}, *get<Idx>(args)...};
         } else {
           return T{*get<Idx>(args)...};
