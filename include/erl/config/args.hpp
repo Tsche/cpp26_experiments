@@ -11,6 +11,7 @@
 #include "annotations.hpp"
 #include "expect.hpp"
 
+#include <erl/util/string.hpp>
 #include <erl/util/meta.hpp>
 #include <erl/log/format/color.hpp>
 
@@ -50,7 +51,7 @@ void check_default_initializable(ArgParser const& parser, ArgumentTuple<T> const
 }
 
 template <std::meta::info R, typename T>
-void validate(T value) {
+void validate(T value, std::string_view parent) {
   if constexpr (erl::meta::has_annotation(R, ^^erl::annotations::Expect)) {
     constexpr static auto constraint = [:value_of(erl::meta::get_annotation(
                                              R,
@@ -61,7 +62,7 @@ void validate(T value) {
       return;
     }
 
-    std::println("Validation failed for argument `{}`", identifier_of(R));
+    std::println("Validation failed for argument `{}` of `{}`", identifier_of(R), parent);
     for (auto&& term : failed_terms | std::views::reverse) {
       std::println("    => {}{}{} evaluated to {}false{}",
                    fg::Blue,
@@ -99,21 +100,24 @@ struct ArgumentInfo {
   }
 };
 
-template <typename T>
 struct Argument {
   struct Unevaluated {
-    using handler_type = void (Unevaluated::*)(ArgumentTuple<T>&) const;
+    using handler_type = void (Unevaluated::*)(void*) const;
 
     std::string_view argument;
-    handler_type handle;
-    void operator()(ArgumentTuple<T>& args) const { (this->*handle)(args); }
+    handler_type handle = nullptr;
+
+    void operator()(void* args) const { (this->*handle)(args); }
 
     template <std::size_t Idx, std::meta::info R>
-    void do_handle(ArgumentTuple<T>& arguments) const {
-      using type = [:type_of(nonstatic_data_members_of(^^T)[Idx]):];
+    void do_handle(void* arguments) const {
+      using parent    = [:is_function_parameter(R) ? type_of(parent_of(R)) : parent_of(R):];
+      using arg_tuple = ArgumentTuple<parent>;
+
+      using type = [:remove_cvref(type_of(R)):];
       auto value = parse_value<type>(argument);
-      validate<R>(value);
-      get<Idx>(arguments) = value;
+      validate<R>(value, display_string_of(parent_of(R)));
+      get<Idx>(*static_cast<arg_tuple*>(arguments)) = value;
     }
 
     template <std::size_t Idx, std::meta::info R>
@@ -143,12 +147,12 @@ struct Argument {
     }
   };
 
-  using parser_type  = bool (Unevaluated::*)(ArgParser&);
-  using default_type = void (*)(ArgParser const&, ArgumentTuple<T> const&);
+  using parser_type = bool (Unevaluated::*)(ArgParser&);
+  // using default_type = void (*)(ArgParser const&, ArgumentTuple<T> const&);
 
   std::size_t index;
   parser_type parse;
-  default_type check_default;
+  // default_type check_default;
   ArgumentInfo info;
 
   consteval Argument(std::size_t idx, std::meta::info reflection)
@@ -156,9 +160,9 @@ struct Argument {
       , parse(meta::instantiate<parser_type>(^^Unevaluated::template do_parse,
                                              std::meta::reflect_value(idx),
                                              reflect_value(reflection)))
-      , check_default(meta::instantiate<default_type>(^^check_default_initializable,
-                                                      ^^T,
-                                                      std::meta::reflect_value(idx)))
+      // , check_default(meta::instantiate<default_type>(^^check_default_initializable,
+      // ^^T,
+      // std::meta::reflect_value(idx)))
       , info(reflection) {}
 };
 
@@ -166,41 +170,46 @@ template <typename T>
 struct Option {
   struct Unevaluated {
     using handler_type = void (Unevaluated::*)(T*) const;
-    std::vector<std::string_view> arguments;
+    std::vector<Argument::Unevaluated> arguments;
     handler_type handle;
     void operator()(T* object) const { (this->*handle)(object); }
 
-    template <std::meta::info R, typename... Ts>
+    template <std::meta::info R>
     void do_handle(T* obj) const {
+      // TODO REFACTOR
       if constexpr (parent_of(R) == ^^T) {
         if constexpr (is_object_type(type_of(R))) {
-          static_assert(sizeof...(Ts) == 1);
-          obj->[:R:] = (parse_value<Ts>(arguments[0]), ...);
+          ArgumentTuple<[:type_of(R):]> arg_tuple;
+          for (auto arg : arguments) {
+            arg(&arg_tuple);
+          }
+          default_invoke<required_arg_count<R>, [:type_of(R):]>([&]<typename Arg>(Arg&& arg){
+            obj->[:R:] = std::forward<Arg>(arg);
+          }, arg_tuple);
         } else {
-          auto [... idx] = std::index_sequence_for<Ts...>();
-          obj->[:R:](parse_value<Ts>(arguments[idx])...);
+          ArgumentTuple<[:type_of(R):]> arg_tuple;
+          for (auto arg : arguments) {
+            arg(&arg_tuple);
+          }
+          default_invoke<required_arg_count<R>, [:type_of(R):]>([&]<typename... Args>(Args&&... args){
+            obj->[:R:](std::forward<Args>(args)...);
+          }, arg_tuple);
         }
       } else {
-        auto [... idx] = std::index_sequence_for<Ts...>();
-        [:R:](parse_value<Ts>(arguments[idx])...);
+        // TODO instead check if this is a static function
+        ArgumentTuple<[:type_of(parent_of(R)):]> arg_tuple;
+        for (auto arg : arguments) {
+          arg(&arg_tuple);
+        }
+        default_invoke<required_arg_count<R>>([]<typename... Args>(Args&&... args){
+          [:R:](std::forward<Args>(args)...);
+        }, arg_tuple);
       }
     }
 
-    static consteval handler_type make_handler(std::meta::info R) {
-      std::vector args = {reflect_value(R)};
-      if (is_object_type(type_of(R))) {
-        args.push_back(type_of(R));
-      } else {
-        for (auto param : parameters_of(R)) {
-          args.push_back(type_of(param));
-        }
-      }
-      return extract<handler_type>(substitute(^^do_handle, args));
-    }
-
-    template <util::fixed_string name, std::meta::info R, Argument<T>... args>
+    template <util::fixed_string name, std::meta::info R, Argument... args>
     bool do_parse(ArgParser& parser) {
-      static constexpr auto current_handler = make_handler(R);
+      static constexpr auto current_handler = meta::instantiate<handler_type>(^^do_handle, reflect_value(R));
       auto arg_name                         = parser.current();
       arg_name.remove_prefix(2);
       if (arg_name != name) {
@@ -208,12 +217,16 @@ struct Option {
       }
       ++parser.cursor;
 
-      for (unsigned idx = 0; idx < sizeof...(args); ++idx) {
-        if (!parser.valid()) {
-          parser.fail("Missing argument {} of option {}", idx, arg_name);
+      [:meta::sequence(sizeof...(args)):] >>= [&]<auto Idx> {
+        Argument::Unevaluated argument;
+        if ((argument.*args...[Idx].parse)(parser)) {
+          arguments.push_back(argument);
+        } else {
+          if (!args...[Idx].info.optional){
+            parser.fail("Missing argument {} of option {}", args...[Idx].info.name, arg_name);
+          }
         }
-        arguments.push_back(parser.args[++parser.cursor]);
-      }
+      };
 
       handle = current_handler;
       return true;
@@ -234,8 +247,7 @@ struct Option {
     if (auto desc = annotation_of_type<annotations::Description>(reflection); desc) {
       description = desc->data;
     }
-
-    std::vector<Argument<T>> args;
+    std::vector<Argument> args;
     std::size_t index = 0;
     if (is_object_type(type_of(reflection))) {
       args.emplace_back(index, reflection);
@@ -269,7 +281,7 @@ template <typename T>
 class Spec {
 private:
   consteval auto get_arguments() {
-    std::vector<Argument<T>> fields;
+    std::vector<Argument> fields;
     auto members = nonstatic_data_members_of(^^T);
     for (std::size_t idx = 0; idx < members.size(); ++idx) {
       if (!meta::has_annotation<annotations::Option>(members[idx])) {
@@ -322,9 +334,9 @@ private:
   }
 
 public:
-  std::span<Argument<T> const> arguments;  // arguments required or usable to construct T
-  std::span<Option<T> const> commands;     // options that do not require a T
-  std::span<Option<T> const> options;      // regular options
+  std::span<Argument const> arguments;  // arguments required or usable to construct T
+  std::span<Option<T> const> commands;  // options that do not require a T
+  std::span<Option<T> const> options;   // regular options
 
   consteval Spec()
       : arguments(std::meta::define_static_array(get_arguments()))
@@ -407,9 +419,9 @@ T parse_args(std::vector<std::string_view> args_in) {
   Program::set_name(args[0]);
   cursor = 1;
 
-  std::vector<typename Argument<T>::Unevaluated> parsed_args{};
+  std::vector<typename Argument::Unevaluated> parsed_args{};
   for (auto Arg : spec.arguments) {
-    typename Argument<T>::Unevaluated argument{};
+    typename Argument::Unevaluated argument{};
     if ((argument.*Arg.parse)(parser)) {
       parsed_args.push_back(argument);
     } else {
@@ -440,13 +452,13 @@ T parse_args(std::vector<std::string_view> args_in) {
 
   ArgumentTuple<T> args_tuple;
   for (auto argument : parsed_args) {
-    argument(args_tuple);
+    argument(&args_tuple);
   }
 
-  for (auto Arg : spec.arguments | std::views::drop(parsed_args.size())) {
-    // default args
-    Arg.check_default(parser, args_tuple);
-  }
+  // for (auto Arg : spec.arguments | std::views::drop(parsed_args.size())) {
+  //   // default args
+  //   Arg.check_default(parser, args_tuple);
+  // }
   T object = default_construct<T>(args_tuple);
 
   // run options

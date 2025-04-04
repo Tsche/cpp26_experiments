@@ -14,7 +14,7 @@ struct Tuple {
   Storage data;
 
   Tuple() : data{} {}
-  Tuple(Ts const&... values) : data{values...} {}
+  Tuple(Ts const&... values) requires(sizeof...(Ts) > 0) : data{values...} {}
 };
 
 template <std::size_t I, typename... Ts>

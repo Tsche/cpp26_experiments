@@ -13,6 +13,7 @@ target_compile_options(erl PUBLIC
   "-freflection"
   "-fannotation-attributes"
   "-fparameter-reflection"
+  "-fexpansion-statements"
   "-ftime-trace"
   "-Wno-c++26-extensions"
   "-O0"
