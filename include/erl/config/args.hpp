@@ -42,14 +42,6 @@ struct ArgParser {
   bool valid() const { return cursor < args.size(); }
 };
 
-template <typename T, std::size_t Idx>
-void check_default_initializable(ArgParser const& parser, ArgumentTuple<T> const& arguments) {
-  constexpr static auto member = nonstatic_data_members_of(^^T)[Idx];
-  if constexpr (!has_default_member_initializer(member)) {
-    parser.fail("Missing required argument: {}", identifier_of(member));
-  }
-}
-
 template <std::meta::info R, typename T>
 void validate(T value, std::string_view parent) {
   if constexpr (erl::meta::has_annotation(R, ^^erl::annotations::Expect)) {
@@ -176,41 +168,35 @@ struct Option {
 
     template <std::meta::info R>
     void do_handle(T* obj) const {
-      // TODO REFACTOR
-      if constexpr (parent_of(R) == ^^T) {
-        if constexpr (is_object_type(type_of(R))) {
-          ArgumentTuple<[:type_of(R):]> arg_tuple;
-          for (auto arg : arguments) {
-            arg(&arg_tuple);
-          }
-          default_invoke<required_arg_count<R>, [:type_of(R):]>([&]<typename Arg>(Arg&& arg){
-            obj->[:R:] = std::forward<Arg>(arg);
-          }, arg_tuple);
-        } else {
-          ArgumentTuple<[:type_of(R):]> arg_tuple;
-          for (auto arg : arguments) {
-            arg(&arg_tuple);
-          }
-          default_invoke<required_arg_count<R>, [:type_of(R):]>([&]<typename... Args>(Args&&... args){
-            obj->[:R:](std::forward<Args>(args)...);
-          }, arg_tuple);
-        }
+      ArgumentTuple<[:type_of(R):]> arg_tuple;
+      for (auto arg : arguments) {
+        arg(&arg_tuple);
+      }
+
+      if constexpr (is_function(R)) {
+        default_invoke<required_arg_count<R>, [:type_of(R):]>(
+            [&]<typename... Args>(Args&&... args) {
+              if constexpr (is_static_member(R)) {
+                [:R:](std::forward<Args>(args)...);
+              } else {
+                obj->[:R:](std::forward<Args>(args)...);
+              }
+            },
+            arg_tuple);
+      } else if constexpr (is_object_type(type_of(R))) {
+        default_invoke<required_arg_count<R>, [:type_of(R):]>(
+            [&]<typename Arg>(Arg&& arg) { obj->[:R:] = std::forward<Arg>(arg); },
+            arg_tuple);
       } else {
-        // TODO instead check if this is a static function
-        ArgumentTuple<[:type_of(parent_of(R)):]> arg_tuple;
-        for (auto arg : arguments) {
-          arg(&arg_tuple);
-        }
-        default_invoke<required_arg_count<R>>([]<typename... Args>(Args&&... args){
-          [:R:](std::forward<Args>(args)...);
-        }, arg_tuple);
+        static_assert(false, "Unsupported handler type.");
       }
     }
 
     template <util::fixed_string name, std::meta::info R, Argument... args>
     bool do_parse(ArgParser& parser) {
-      static constexpr auto current_handler = meta::instantiate<handler_type>(^^do_handle, reflect_value(R));
-      auto arg_name                         = parser.current();
+      static constexpr auto current_handler =
+          meta::instantiate<handler_type>(^^do_handle, reflect_value(R));
+      auto arg_name = parser.current();
       arg_name.remove_prefix(2);
       if (arg_name != name) {
         return false;
@@ -222,7 +208,7 @@ struct Option {
         if ((argument.*args...[Idx].parse)(parser)) {
           arguments.push_back(argument);
         } else {
-          if (!args...[Idx].info.optional){
+          if (!args...[Idx].info.optional) {
             parser.fail("Missing argument {} of option {}", args...[Idx].info.name, arg_name);
           }
         }
@@ -387,7 +373,13 @@ struct clap {
     std::println("usage: {} {}", program_name, arguments);
     std::println("Options:");
 
-    auto print_option = [](auto opt) {
+    auto name_length = [](Option<T> opt) { return std::strlen(opt.name); };
+    std::size_t max_name_length = std::max(
+        std::ranges::max(spec.commands | std::views::transform(name_length)),
+        std::ranges::max(spec.options | std::views::transform(name_length))
+    );
+
+    auto print_option = [&](auto opt) {
       std::string params;
       for (std::size_t idx = 0; idx < opt.argument_count; ++idx) {
         params += std::format("{}[{}] ", opt.arguments[idx].name, opt.arguments[idx].type);
@@ -395,7 +387,7 @@ struct clap {
 
       std::println("--{} {}", opt.name, params);
       if (opt.description) {
-        std::println("{:<10} {}", "", opt.description);
+        std::println("{:<{}} {}", "", max_name_length, opt.description);
       }
     };
 
@@ -419,9 +411,9 @@ T parse_args(std::vector<std::string_view> args_in) {
   Program::set_name(args[0]);
   cursor = 1;
 
-  std::vector<typename Argument::Unevaluated> parsed_args{};
+  std::vector<Argument::Unevaluated> parsed_args{};
   for (auto Arg : spec.arguments) {
-    typename Argument::Unevaluated argument{};
+    Argument::Unevaluated argument{};
     if ((argument.*Arg.parse)(parser)) {
       parsed_args.push_back(argument);
     } else {
@@ -445,7 +437,7 @@ T parse_args(std::vector<std::string_view> args_in) {
 
     found = ((option.*Opts.parse)(parser) || ...);
     if (!found) {
-      parser.fail("Could not find option {}", parser.current());
+      parser.fail("Could not find option `{}`", parser.current());
     }
     parsed_opts.push_back(option);
   }
@@ -455,10 +447,12 @@ T parse_args(std::vector<std::string_view> args_in) {
     argument(&args_tuple);
   }
 
-  // for (auto Arg : spec.arguments | std::views::drop(parsed_args.size())) {
-  //   // default args
-  //   Arg.check_default(parser, args_tuple);
-  // }
+  for (auto arg : spec.arguments | std::views::drop(parsed_args.size())) {
+    if (!arg.info.optional){
+      parser.fail("Missing required argument `{}`", arg.info.name);
+    }
+  }
+
   T object = default_construct<T>(args_tuple);
 
   // run options
