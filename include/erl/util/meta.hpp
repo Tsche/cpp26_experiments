@@ -35,8 +35,7 @@ consteval auto nonstatic_member_functions_of(std::meta::info reflection) {
 }
 
 consteval auto static_member_functions_of(std::meta::info reflection) {
-  return member_functions_of(reflection) |
-         std::views::filter(std::meta::is_static_member) |
+  return member_functions_of(reflection) | std::views::filter(std::meta::is_static_member) |
          std::ranges::to<std::vector>();
 }
 
@@ -45,17 +44,20 @@ consteval auto named_members_of(std::meta::info reflection) {
          std::ranges::to<std::vector>();
 }
 
-consteval auto get_annotation(std::meta::info item, std::meta::info type) {
-  if (is_type(type)) {
-    return annotations_of(item, type)[0];
-  } else if (is_template(type)) {
-    for (auto annotation : annotations_of(item)) {
-      if (has_template_arguments(type_of(annotation)) && template_of(type_of(annotation)) == type) {
-        return annotation;
-      }
+consteval std::vector<std::meta::info> get_annotations(std::meta::info item, std::meta::info type) {
+  std::vector<std::meta::info> annotations;
+  for (auto annotation : annotations_of(item)) {
+    if ((is_type(type) && type == type_of(annotation)) ||
+        (is_template(type) && has_template_arguments(type_of(annotation)) &&
+         template_of(type_of(annotation)) == type)) {
+      annotations.push_back(annotation);
     }
   }
-  return ^^::;
+  return annotations;
+}
+
+consteval std::meta::info get_annotation(std::meta::info item, std::meta::info type) {
+  return get_annotations(item, type)[0];
 }
 
 template <typename T>

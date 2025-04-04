@@ -7,6 +7,7 @@
 #include <format>
 
 #include <erl/tuple.hpp>
+#include <erl/util/string.hpp>
 #include <erl/util/concepts.hpp>
 #include <erl/util/meta.hpp>
 #include <erl/util/operators.hpp>
@@ -100,40 +101,58 @@ struct BinaryExpr {
       auto lhs_   = lhs.eval_verbose(args, failed_terms);
       auto result = eval_operator(rhs_, lhs_);
       if (!result) {
-        failed_terms.push_back(print(args));
+        failed_terms.push_back(to_string(args));
       }
       return result;
     } else if constexpr (rhs_evaluatable) {
       auto rhs_   = rhs.eval_verbose(args, failed_terms);
       auto result = eval_operator(rhs_, lhs);
       if (!result) {
-        failed_terms.push_back(print(args));
+        failed_terms.push_back(to_string(args));
       }
       return result;
     } else if constexpr (lhs_evaluatable) {
       auto lhs_   = lhs.eval_verbose(args, failed_terms);
       auto result = eval_operator(rhs, lhs_);
       if (!result) {
-        failed_terms.push_back(print(args));
+        failed_terms.push_back(to_string(args));
       }
       return result;
     }
   }
 
-  std::string print(auto const& args) const {
+  std::string to_string(auto const& args) const {
+    // TODO constexpr
     static constexpr bool rhs_printable = requires {
-      { rhs.print(args) } -> std::same_as<std::string>;
+      { rhs.to_string(args) } -> std::same_as<std::string>;
     };
     static constexpr bool lhs_printable = requires {
-      { lhs.print(args) } -> std::same_as<std::string>;
+      { lhs.to_string(args) } -> std::same_as<std::string>;
     };
 
     if constexpr (rhs_printable && lhs_printable) {
-      return std::format("({} {} {})", rhs.print(args), util::to_string(OP), lhs.print(args));
+      return std::format("({} {} {})", rhs.to_string(args), util::to_string(OP), lhs.to_string(args));
     } else if constexpr (rhs_printable) {
-      return std::format("({} {} {})", rhs.print(args), util::to_string(OP), lhs);
+      return std::format("({} {} {})", rhs.to_string(args), util::to_string(OP), lhs);
     } else if constexpr (lhs_printable) {
-      return std::format("({} {} {})", rhs, util::to_string(OP), lhs.print(args));
+      return std::format("({} {} {})", rhs, util::to_string(OP), lhs.to_string(args));
+    }
+  }
+
+  constexpr std::string to_string(std::vector<std::string_view> const& replacements) const {
+    static constexpr bool rhs_printable = requires {
+      { rhs.to_string(replacements) } -> std::same_as<std::string>;
+    };
+    static constexpr bool lhs_printable = requires {
+      { lhs.to_string(replacements) } -> std::same_as<std::string>;
+    };
+
+    if constexpr (rhs_printable && lhs_printable) {
+      return std::string("(") + rhs.to_string(replacements) + " " + util::to_string(OP) + " " + lhs.to_string(replacements) + ")";
+    } else if constexpr (rhs_printable) {
+      return std::string("(") + rhs.to_string(replacements) + " " + util::to_string(OP) + " " + util::to_string(lhs) + ")";
+    } else if constexpr (lhs_printable) {
+      return std::string("(") + util::to_string(rhs) + " " + util::to_string(OP) + " " + lhs.to_string(replacements) + ")";
     }
   }
 
@@ -233,7 +252,14 @@ struct Placeholder {
     return eval(args);
   }
 
-  std::string print(auto const& args) const { return std::format("{}", get<Idx>(args)); }
+  std::string to_string(auto const& args) const { 
+    // TODO constexpr
+    return std::format("{}", get<Idx>(args));
+  }
+
+  constexpr std::string to_string(std::vector<std::string_view> const& replacements) const {
+    return std::string(replacements[Idx]);
+  }
 };
 
 template <typename F, typename... Args>
@@ -277,7 +303,8 @@ struct Lazy {
     return eval(args);
   }
 
-  std::string print(auto const& args) const { return "<lazy call>"; }
+  constexpr std::string to_string(auto const& args) const { return "<lazy call>"; }
+  constexpr std::string to_string(std::vector<std::string_view> const&) const { return "<lazy call>"; }
 };
 
 #define LAZY_ARGS(...)    \

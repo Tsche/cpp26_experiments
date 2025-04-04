@@ -1,7 +1,7 @@
 #include <erl/config/args.hpp>
 #include <erl/print.hpp>
 
-struct Args : erl::clap {
+struct [[= erl::clap::description("Example program.")]] Args : erl::clap {
   std::string text;
   [[=expect(2 < value && value < 10)]] 
   int times = 5;

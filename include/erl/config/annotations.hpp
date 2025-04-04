@@ -27,7 +27,11 @@ struct Description : StringAnnotation {
 };
 
 template <typename T>
-struct Expect : T {};
+struct Expect : T {
+  constexpr std::string to_string(std::string_view replacement = "value") const {
+    return T::to_string(std::vector{replacement});
+  }
+};
 
 struct {
   consteval auto operator()(auto expr) const {

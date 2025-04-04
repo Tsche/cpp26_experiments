@@ -42,56 +42,6 @@ struct ArgParser {
   bool valid() const { return cursor < args.size(); }
 };
 
-template <std::meta::info R, typename T>
-void validate(T value, std::string_view parent) {
-  if constexpr (erl::meta::has_annotation(R, ^^erl::annotations::Expect)) {
-    constexpr static auto constraint = [:value_of(erl::meta::get_annotation(
-                                             R,
-                                             ^^erl::annotations::Expect)):];
-
-    std::vector<std::string> failed_terms;
-    if (constraint.eval_verbose(erl::Tuple{value}, failed_terms)) {
-      return;
-    }
-
-    std::println("Validation failed for argument `{}` of `{}`", identifier_of(R), parent);
-    for (auto&& term : failed_terms | std::views::reverse) {
-      std::println("    => {}{}{} evaluated to {}false{}",
-                   fg::Blue,
-                   term,
-                   style::Reset,
-                   fg::Red,
-                   style::Reset);
-    }
-    std::exit(1);
-  }
-}
-
-struct ArgumentInfo {
-  char const* name;
-  char const* type;
-  char const* description;
-  bool optional = false;
-  std::size_t constraint_count;
-  char const* const* constraints;
-
-  explicit consteval ArgumentInfo(std::meta::info reflection)
-      : name(std::meta::define_static_string(identifier_of(reflection)))
-      , type(std::meta::define_static_string(
-            display_string_of(type_of(reflection))))  // TODO clean at this point?
-      , optional(is_function_parameter(reflection) ? has_default_argument(reflection)
-                                                   : has_default_member_initializer(reflection)) {
-    if (auto desc = annotation_of_type<annotations::Description>(reflection); desc) {
-      description = desc->data;
-    } else {
-      description = std::meta::define_static_string("");
-    }
-
-    constraint_count = 0;
-    constraints      = nullptr;  // std::meta::define_static_array(std::vector{""}).data();
-  }
-};
-
 struct Argument {
   struct Unevaluated {
     using handler_type = void (Unevaluated::*)(void*) const;
@@ -101,6 +51,32 @@ struct Argument {
 
     void operator()(void* args) const { (this->*handle)(args); }
 
+    template <std::meta::info R, typename T>
+    void validate(T value) const {
+      auto parent = display_string_of(parent_of(R));
+      if constexpr (erl::meta::has_annotation(R, ^^erl::annotations::Expect)) {
+        constexpr static auto constraint = [:value_of(erl::meta::get_annotation(
+                                                 R,
+                                                 ^^erl::annotations::Expect)):];
+
+        std::vector<std::string> failed_terms;
+        if (constraint.eval_verbose(erl::Tuple{value}, failed_terms)) {
+          return;
+        }
+
+        std::println("Validation failed for argument `{}` of `{}`", identifier_of(R), parent);
+        for (auto&& term : failed_terms | std::views::reverse) {
+          std::println("    => {}{}{} evaluated to {}false{}",
+                       fg::Blue,
+                       term,
+                       style::Reset,
+                       fg::Red,
+                       style::Reset);
+        }
+        std::exit(1);
+      }
+    }
+
     template <std::size_t Idx, std::meta::info R>
     void do_handle(void* arguments) const {
       using parent    = [:is_function_parameter(R) ? type_of(parent_of(R)) : parent_of(R):];
@@ -108,7 +84,7 @@ struct Argument {
 
       using type = [:remove_cvref(type_of(R)):];
       auto value = parse_value<type>(argument);
-      validate<R>(value, display_string_of(parent_of(R)));
+      validate<R>(value);
       get<Idx>(*static_cast<arg_tuple*>(arguments)) = value;
     }
 
@@ -140,22 +116,46 @@ struct Argument {
   };
 
   using parser_type = bool (Unevaluated::*)(ArgParser&);
-  // using default_type = void (*)(ArgParser const&, ArgumentTuple<T> const&);
-
   std::size_t index;
   parser_type parse;
-  // default_type check_default;
-  ArgumentInfo info;
+
+  char const* name;
+  char const* type;
+  char const* description;
+  bool optional = false;
+  char const* constraint;
+
+  template <std::meta::info R, auto Constraint>
+  constexpr char const* stringify_constraint() {
+    std::string _constraint = Constraint.to_string(identifier_of(R));
+    return std::meta::define_static_string(_constraint.substr(1, _constraint.size() - 2));
+  }
 
   consteval Argument(std::size_t idx, std::meta::info reflection)
       : index(idx)
       , parse(meta::instantiate<parser_type>(^^Unevaluated::template do_parse,
                                              std::meta::reflect_value(idx),
                                              reflect_value(reflection)))
-      // , check_default(meta::instantiate<default_type>(^^check_default_initializable,
-      // ^^T,
-      // std::meta::reflect_value(idx)))
-      , info(reflection) {}
+      , name(std::meta::define_static_string(identifier_of(reflection)))
+      , type(std::meta::define_static_string(
+            display_string_of(type_of(reflection))))  // TODO clean at this point?
+      , optional(is_function_parameter(reflection) ? has_default_argument(reflection)
+                                                   : has_default_member_initializer(reflection)) {
+    if (auto desc = annotation_of_type<annotations::Description>(reflection); desc) {
+      description = desc->data;
+    } else {
+      description = std::meta::define_static_string("");
+    }
+
+    if (erl::meta::has_annotation(reflection, ^^erl::annotations::Expect)) {
+      auto annotation = erl::meta::get_annotation(reflection, ^^erl::annotations::Expect);
+      constraint = (this->*meta::instantiate<char const* (Argument::*)()>(^^stringify_constraint,
+                                                                          reflect_value(reflection),
+                                                                          value_of(annotation)))();
+    } else {
+      constraint = nullptr;
+    }
+  }
 };
 
 template <typename T>
@@ -208,8 +208,8 @@ struct Option {
         if ((argument.*args...[Idx].parse)(parser)) {
           arguments.push_back(argument);
         } else {
-          if (!args...[Idx].info.optional) {
-            parser.fail("Missing argument {} of option {}", args...[Idx].info.name, arg_name);
+          if (!args...[Idx].optional) {
+            parser.fail("Missing argument {} of option {}", args...[Idx].name, arg_name);
           }
         }
       };
@@ -226,7 +226,7 @@ struct Option {
   char const* description = nullptr;
 
   std::size_t argument_count;
-  ArgumentInfo const* arguments;
+  Argument const* arguments;
 
   consteval Option(std::string_view name, std::meta::info reflection)
       : name(std::meta::define_static_string(name)) {
@@ -243,13 +243,8 @@ struct Option {
       }
     }
 
-    std::vector<ArgumentInfo> arg_infos;
-    for (auto arg : args) {
-      arg_infos.push_back(arg.info);
-    }
-
     argument_count = args.size();
-    arguments      = std::meta::define_static_array(arg_infos).data();
+    arguments      = std::meta::define_static_array(args).data();
 
     std::vector parse_args = {meta::promote(name), reflect_value(reflection)};
     for (auto arg : args) {
@@ -268,10 +263,10 @@ class Spec {
 private:
   consteval auto get_arguments() {
     std::vector<Argument> fields;
-    auto members = nonstatic_data_members_of(^^T);
-    for (std::size_t idx = 0; idx < members.size(); ++idx) {
-      if (!meta::has_annotation<annotations::Option>(members[idx])) {
-        fields.emplace_back(idx, members[idx]);
+    std::size_t idx = 0;
+    for (auto member : nonstatic_data_members_of(^^T)) {
+      if (!meta::has_annotation<annotations::Option>(member)) {
+        fields.emplace_back(idx++, member);
       }
     }
     return fields;
@@ -364,30 +359,61 @@ struct clap {
     auto program_name = Program::name();
     std::string arguments{};
     for (auto argument : spec.arguments) {
-      if (argument.info.optional) {
-        arguments += std::format("[{}] ", argument.info.name);
+      if (argument.optional) {
+        arguments += std::format("[{}] ", argument.name);
       } else {
-        arguments += std::format("{} ", argument.info.name);
+        arguments += std::format("{} ", argument.name);
       }
     }
     std::println("usage: {} {}", program_name, arguments);
-    std::println("Options:");
+
+    if (auto desc = annotation_of_type<annotations::Description>(^^T); desc) {
+      std::println("\n{}", desc->data);
+    }
+
+    std::println("\nArguments:");
+    for (auto argument : spec.arguments) {
+      std::string constraint = argument.constraint ? std::string(" requires: ") + argument.constraint : "";
+      std::println("    {} {}{}", argument.type, argument.name, constraint);
+    }
+
+    std::println("\nOptions:");
 
     auto name_length = [](Option<T> opt) { return std::strlen(opt.name); };
-    std::size_t max_name_length = std::max(
-        std::ranges::max(spec.commands | std::views::transform(name_length)),
-        std::ranges::max(spec.options | std::views::transform(name_length))
-    );
+    std::size_t max_name_length =
+        std::max(std::ranges::max(spec.commands | std::views::transform(name_length)),
+                 std::ranges::max(spec.options | std::views::transform(name_length)));
 
-    auto print_option = [&](auto opt) {
+    auto print_option = [&](Option<T> opt) {
       std::string params;
+      bool has_constraints = false;
       for (std::size_t idx = 0; idx < opt.argument_count; ++idx) {
-        params += std::format("{}[{}] ", opt.arguments[idx].name, opt.arguments[idx].type);
+        if (opt.arguments[idx].optional) {
+          params += std::format("[{}] ", opt.arguments[idx].name);
+        } else {
+          params += std::format("{} ", opt.arguments[idx].name);
+        }
+        if (opt.arguments[idx].constraint != nullptr) {
+          has_constraints = true;
+        }
       }
 
-      std::println("--{} {}", opt.name, params);
+      std::println("    --{} {}", opt.name, params);
+      std::size_t offset = max_name_length + 4 + 4;
       if (opt.description) {
-        std::println("{:<{}} {}", "", max_name_length, opt.description);
+        std::println("{:<{}}{}\n", "", offset, opt.description);
+      }
+
+      if (opt.argument_count != 0) {
+        std::println("{:<{}}Arguments:", "", offset);
+        for (std::size_t idx = 0; idx < opt.argument_count; ++idx) {
+          std::string constraint = opt.arguments[idx].constraint ? std::string(" requires: ") + opt.arguments[idx].constraint : "";
+          char const* optional = "";
+          if (opt.arguments[idx].optional) {
+            optional = " (optional)";
+          }
+          std::println("{:<{}}{} {}{}{}", "", offset + 4, opt.arguments[idx].type, opt.arguments[idx].name, optional, constraint);
+        }
       }
     };
 
@@ -448,8 +474,8 @@ T parse_args(std::vector<std::string_view> args_in) {
   }
 
   for (auto arg : spec.arguments | std::views::drop(parsed_args.size())) {
-    if (!arg.info.optional){
-      parser.fail("Missing required argument `{}`", arg.info.name);
+    if (!arg.optional) {
+      parser.fail("Missing required argument `{}`", arg.name);
     }
   }
 
