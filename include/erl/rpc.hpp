@@ -1,10 +1,10 @@
 #pragma once
-#include <erl/queue/spsc_bounded.hpp>
-#include <erl/queue/mpmc_bounded.hpp>
-#include <erl/net/queue.hpp>
-#include <erl/net/service.hpp>
-#include <erl/rpc/protocol.hpp>
-#include <erl/rpc/proxy.hpp>
+#include <erl/_impl/queue/spsc_bounded.hpp>
+#include <erl/_impl/queue/mpmc_bounded.hpp>
+#include <erl/_impl/net/queue.hpp>
+#include <erl/_impl/net/service.hpp>
+#include <erl/_impl/rpc/protocol.hpp>
+#include <erl/_impl/rpc/proxy.hpp>
 
 
 namespace erl {

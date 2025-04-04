@@ -1,8 +1,8 @@
 #include <thread>
 #include <unordered_map>
 #include <erl/print.hpp>
-#include <erl/log/sinks/terminal.hpp>
-#include <erl/log/format/color.hpp>
+#include <erl/_impl/log/sinks/terminal.hpp>
+#include <erl/_impl/log/format/color.hpp>
 #include <erl/thread.hpp>
 #include <erl/print.hpp>
 #include <erl/logging.hpp>

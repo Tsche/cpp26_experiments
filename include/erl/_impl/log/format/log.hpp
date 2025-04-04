@@ -6,8 +6,8 @@
 #include <experimental/meta>
 
 #include <erl/kwargs.hpp>
-#include <erl/util/string.hpp>
-#include <erl/util/meta.hpp>
+#include <erl/_impl/util/string.hpp>
+#include <erl/_impl/util/meta.hpp>
 #include <string>
 #include "../message.hpp"
 

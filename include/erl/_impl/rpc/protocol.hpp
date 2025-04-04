@@ -3,9 +3,9 @@
 #include <experimental/meta>
 #include <span>
 
-#include <erl/rpc/proxy.hpp>
+#include <erl/_impl/rpc/proxy.hpp>
 #include <erl/reflect.hpp>
-#include <erl/net/message/reader.hpp>
+#include <erl/_impl/net/message/reader.hpp>
 
 #include <print>
 

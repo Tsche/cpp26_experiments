@@ -4,9 +4,9 @@
 #include <unordered_map>
 
 #include <erl/thread.hpp>
-#include <erl/log/message.hpp>
-#include <erl/log/format/log.hpp>
-#include <erl/log/format/color.hpp>
+#include <erl/_impl/log/message.hpp>
+#include <erl/_impl/log/format/log.hpp>
+#include <erl/_impl/log/format/color.hpp>
 
 #include "sink.hpp"
 

@@ -11,9 +11,9 @@
 #include "annotations.hpp"
 #include "expect.hpp"
 
-#include <erl/util/string.hpp>
-#include <erl/util/meta.hpp>
-#include <erl/log/format/color.hpp>
+#include <erl/_impl/util/string.hpp>
+#include <erl/_impl/util/meta.hpp>
+#include <erl/_impl/log/format/color.hpp>
 
 namespace erl {
 template <typename T>
@@ -39,7 +39,7 @@ struct ArgParser {
     std::exit(1);
   }
 
-  bool valid() const { return cursor < args.size(); }
+  [[nodiscard]] bool valid() const noexcept { return cursor < args.size(); }
 };
 
 struct Argument {
@@ -373,8 +373,8 @@ struct clap {
 
     std::println("\nArguments:");
     for (auto argument : spec.arguments) {
-      std::string constraint = argument.constraint ? std::string(" requires: ") + argument.constraint : "";
-      std::println("    {} {}{}", argument.type, argument.name, constraint);
+      std::string constraint = argument.constraint ? std::format("\n{:<8}requires: {}", "", argument.constraint) : "";
+      std::println("    {} -> {}{}", argument.name, argument.type, constraint);
     }
 
     std::println("\nOptions:");
@@ -407,12 +407,12 @@ struct clap {
       if (opt.argument_count != 0) {
         std::println("{:<{}}Arguments:", "", offset);
         for (std::size_t idx = 0; idx < opt.argument_count; ++idx) {
-          std::string constraint = opt.arguments[idx].constraint ? std::string(" requires: ") + opt.arguments[idx].constraint : "";
+          std::string constraint = opt.arguments[idx].constraint ? std::format("\n{:<{}}requires: {}", "", offset + 8, opt.arguments[idx].constraint) : "";
           char const* optional = "";
           if (opt.arguments[idx].optional) {
             optional = " (optional)";
           }
-          std::println("{:<{}}{} {}{}{}", "", offset + 4, opt.arguments[idx].type, opt.arguments[idx].name, optional, constraint);
+          std::println("{:<{}}{} -> {}{}{}", "", offset + 4, opt.arguments[idx].name, opt.arguments[idx].type, optional, constraint);
         }
       }
     };

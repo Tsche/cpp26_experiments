@@ -7,10 +7,10 @@
 #include <format>
 
 #include <erl/tuple.hpp>
-#include <erl/util/string.hpp>
-#include <erl/util/concepts.hpp>
-#include <erl/util/meta.hpp>
-#include <erl/util/operators.hpp>
+#include <erl/_impl/util/string.hpp>
+#include <erl/_impl/util/concepts.hpp>
+#include <erl/_impl/util/meta.hpp>
+#include <erl/_impl/util/operators.hpp>
 
 namespace erl::_expect_impl {
 template <typename T>

@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <experimental/meta>
 
-#include <erl/util/meta.hpp>
+#include <erl/_impl/util/meta.hpp>
 
 namespace erl {
 

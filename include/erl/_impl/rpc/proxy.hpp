@@ -8,10 +8,10 @@
 #include <experimental/meta>
 
 #include <erl/reflect.hpp>
-#include <erl/util/meta.hpp>
-#include <erl/util/stamp.hpp>
-#include <erl/net/message/buffer.hpp>
-#include <erl/net/message/reader.hpp>
+#include <erl/_impl/util/meta.hpp>
+#include <erl/_impl/util/stamp.hpp>
+#include <erl/_impl/net/message/buffer.hpp>
+#include <erl/_impl/net/message/reader.hpp>
 #include "dispatch.hpp"
 
 namespace erl::rpc {

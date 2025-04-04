@@ -6,7 +6,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <erl/net/transport/tcp.hpp>
+#include <erl/_impl/net/transport/tcp.hpp>
 
 namespace erl::tcp {
 Socket::Socket() : handle(-1) {}

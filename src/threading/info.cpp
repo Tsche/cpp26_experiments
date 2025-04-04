@@ -4,7 +4,7 @@
 #include <unordered_map>
 #include <shared_mutex>
 
-#include <erl/log/logger.hpp>
+#include <erl/_impl/log/logger.hpp>
 #include <erl/thread.hpp>
 
 #include "platform/info.h"

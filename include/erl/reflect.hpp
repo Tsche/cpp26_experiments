@@ -10,8 +10,8 @@
 #include <vector>
 
 #include <experimental/meta>
-#include "util/meta.hpp"
-#include "util/hash.hpp"
+#include "_impl/util/meta.hpp"
+#include "_impl/util/hash.hpp"
 
 namespace erl {
 

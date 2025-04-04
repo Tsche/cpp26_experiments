@@ -2,7 +2,7 @@
 #include <string_view>
 #include <filesystem>
 
-#include <erl/plugin/impl.hpp>
+#include <erl/_impl/plugin/impl.hpp>
 
 namespace erl {
 using erl::plugin::Plugin;

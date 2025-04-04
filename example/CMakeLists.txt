@@ -1,4 +1,4 @@
-project(slo C CXX)
+project(erl_examples C CXX)
 
 function(DEFINE_EXAMPLE TARGET)
   add_executable(${TARGET} "${TARGET}.cpp")
@@ -14,3 +14,5 @@ add_library(demo_plugin SHARED "plugins/demo.cpp")
 target_link_libraries(demo_plugin PRIVATE erl)
 
 define_example(plugin)
+
+define_example(modules)

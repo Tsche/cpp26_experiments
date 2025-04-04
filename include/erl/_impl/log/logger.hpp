@@ -2,9 +2,9 @@
 #include <vector>
 #include <unordered_map>
 
-#include <erl/net/message/buffer.hpp>
+#include <erl/_impl/net/message/buffer.hpp>
 #include <erl/rpc.hpp>
-#include <erl/rpc/proxy.hpp>
+#include <erl/_impl/rpc/proxy.hpp>
 #include <erl/clock.hpp>
 
 #include "sinks/sink.hpp"

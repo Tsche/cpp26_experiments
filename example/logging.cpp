@@ -1,15 +1,15 @@
-#include <erl/log/logger.hpp>
+#include <erl/_impl/log/logger.hpp>
 #include <map>
 #include <thread>
 #include <vector>
 
 #include <erl/print.hpp>
-#include <erl/log/sinks/terminal.hpp>
+#include <erl/_impl/log/sinks/terminal.hpp>
 #include <erl/thread.hpp>
 
 #include <iostream>
-#include "erl/log/format/log.hpp"
-#include "erl/log/message.hpp"
+#include "erl/_impl/log/format/log.hpp"
+#include "erl/_impl/log/message.hpp"
 
 void bench() {
   // const size_t queueSize = 100000;
@@ -56,7 +56,7 @@ void bench() {
 #include <chrono>
 #include <sys/time.h>
 
-#include <erl/log/format/color.hpp>
+#include <erl/_impl/log/format/color.hpp>
 
 int main() {
   using namespace std::chrono_literals;

@@ -7,11 +7,11 @@
 
 #include <experimental/meta>
 
-#include <erl/net/message/buffer.hpp>
-#include <erl/util/string.hpp>
+#include <erl/_impl/net/message/buffer.hpp>
+#include <erl/_impl/util/string.hpp>
 
 #include "message.hpp"
-#include <erl/net/message/reader.hpp>
+#include <erl/_impl/net/message/reader.hpp>
 
 namespace erl::logging {
 namespace impl {

@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <erl/version.h>
-#include <erl/plugin/cinterface.h>
+#include <erl/_impl/plugin/cinterface.h>
 extern "C" {
 $export PluginInfo plugin_info{.api_version = ERL_API_VERSION,
                                .name        = "demo plugin",

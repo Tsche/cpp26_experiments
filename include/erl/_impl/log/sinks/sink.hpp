@@ -1,5 +1,5 @@
 #pragma once
-#include <erl/log/message.hpp>
+#include <erl/_impl/log/message.hpp>
 
 namespace erl::logging {
 struct Sink {

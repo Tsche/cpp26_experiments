@@ -8,13 +8,13 @@
 #include <type_traits>
 #include <vector>
 
-#include <erl/util/meta.hpp>
-#include <erl/util/containers.hpp>
-#include <erl/util/parser.hpp>
-#include <erl/util/string.hpp>
-#include <erl/util/concepts.hpp>
+#include <erl/_impl/util/meta.hpp>
+#include <erl/_impl/util/containers.hpp>
+#include <erl/_impl/util/parser.hpp>
+#include <erl/_impl/util/string.hpp>
+#include <erl/_impl/util/concepts.hpp>
 
-#include <erl/compat/p1789.hpp>
+#include <erl/_impl/compat/p1789.hpp>
 
 namespace erl::impl::_format_impl {
 

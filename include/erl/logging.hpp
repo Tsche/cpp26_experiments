@@ -1,7 +1,7 @@
 #pragma once
-#include <erl/log/logger.hpp>
-#include <erl/log/message.hpp>
-#include <erl/log/format.hpp>
+#include <erl/_impl/log/logger.hpp>
+#include <erl/_impl/log/message.hpp>
+#include <erl/_impl/log/format.hpp>
 
 namespace erl {
 template <typename... Args>

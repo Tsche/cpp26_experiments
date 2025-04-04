@@ -1,5 +1,5 @@
 #include <cstdio>
-#include <erl/rpc/rpc.hpp>
+#include <erl/_impl/rpc/rpc.hpp>
 #include <erl/message.hpp>
 
 #include <arpa/inet.h>

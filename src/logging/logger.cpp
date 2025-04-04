@@ -1,8 +1,8 @@
 #include <chrono>
 
-#include <erl/log/logger.hpp>
-#include <erl/log/message.hpp>
-#include <erl/net/message/reader.hpp>
+#include <erl/_impl/log/logger.hpp>
+#include <erl/_impl/log/message.hpp>
+#include <erl/_impl/net/message/reader.hpp>
 #include <erl/thread.hpp>
 #include <erl/clock.hpp>
 

@@ -4,9 +4,9 @@
 #include <string>
 #include <array>
 #include <initializer_list>
-#include <erl/util/string.hpp>
+#include <erl/_impl/util/string.hpp>
 
-#include <erl/log/message.hpp>
+#include <erl/_impl/log/message.hpp>
 
 namespace erl::color {
 constexpr std::string make_ansi_code(unsigned option) {
