@@ -1,5 +1,5 @@
 #include <erl/_impl/config/args.hpp>
-#include <erl/print.hpp>
+#include <erl/print>
 
 struct [[= erl::clap::description("Example program.")]] Args : erl::clap {
   std::string text;

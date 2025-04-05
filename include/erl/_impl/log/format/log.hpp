@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <experimental/meta>
 
-#include <erl/kwargs.hpp>
+#include <erl/kwargs>
 #include <erl/_impl/util/string.hpp>
 #include <erl/_impl/util/meta.hpp>
 #include <string>

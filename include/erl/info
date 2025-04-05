@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <filesystem>
 
 namespace erl {
 struct ThreadInfo {
@@ -18,4 +19,22 @@ struct ThreadInfo {
 };
 
 inline thread_local ThreadInfo const this_thread{ThreadInfo::current()};
-}  // namespace erl
+
+struct Program {
+private:
+  static std::string& get_name() {
+    static std::string name;
+    return name;
+  }
+
+public:
+  static void set_name(std::string_view arg0) {
+    if (arg0.empty()) {
+      return;
+    }
+    auto path  = std::filesystem::path(arg0);
+    get_name() = path.stem().string();
+  }
+  static std::string_view name() { return get_name(); }
+};
+}

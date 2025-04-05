@@ -7,7 +7,7 @@
 #include <ranges>
 #include <experimental/meta>
 
-#include <erl/reflect.hpp>
+#include <erl/reflect>
 #include <erl/_impl/util/meta.hpp>
 #include <erl/_impl/util/stamp.hpp>
 #include <erl/_impl/net/message/buffer.hpp>

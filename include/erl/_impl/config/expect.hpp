@@ -6,7 +6,7 @@
 #include <string>
 #include <format>
 
-#include <erl/tuple.hpp>
+#include <erl/tuple>
 #include <erl/_impl/util/string.hpp>
 #include <erl/_impl/util/concepts.hpp>
 #include <erl/_impl/util/meta.hpp>

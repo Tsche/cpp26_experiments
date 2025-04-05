@@ -1,4 +1,4 @@
-#include <erl/plugin.hpp>
+#include <erl/plugin>
 
 namespace erl {
 

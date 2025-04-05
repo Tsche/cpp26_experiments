@@ -15,6 +15,8 @@
 #include <erl/_impl/util/meta.hpp>
 #include <erl/_impl/log/format/color.hpp>
 
+#include <erl/info>
+
 namespace erl {
 template <typename T>
 T parse_value(std::string_view value) {
@@ -325,23 +327,7 @@ public:
       , options(std::meta::define_static_array(get_options())) {}
 };
 
-struct Program {
-private:
-  static std::string& get_name() {
-    static std::string name;
-    return name;
-  }
 
-public:
-  static void set_name(std::string_view arg0) {
-    if (arg0.empty()) {
-      return;
-    }
-    auto path  = std::filesystem::path(arg0);
-    get_name() = path.stem().string();
-  }
-  static std::string_view name() { return get_name(); }
-};
 
 struct clap {
   static constexpr annotations::Option option;

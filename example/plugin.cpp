@@ -1,5 +1,5 @@
 #include <print>
-#include <erl/plugin.hpp>
+#include <erl/plugin>
 
 int main() {
   auto plugin = erl::load_plugin("libdemo_plugin.so");

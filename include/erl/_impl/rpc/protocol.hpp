@@ -4,7 +4,7 @@
 #include <span>
 
 #include <erl/_impl/rpc/proxy.hpp>
-#include <erl/reflect.hpp>
+#include <erl/reflect>
 #include <erl/_impl/net/message/reader.hpp>
 
 #include <print>

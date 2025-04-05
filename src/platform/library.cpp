@@ -14,7 +14,7 @@
 #  include <dlfcn.h>
 #endif
 
-#include <erl/autoload.hpp>
+#include <erl/autoload>
 
 namespace erl::platform {
 #if (defined(_WIN32) || defined(_WIN64))

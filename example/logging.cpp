@@ -3,9 +3,9 @@
 #include <thread>
 #include <vector>
 
-#include <erl/print.hpp>
+#include <erl/print>
 #include <erl/_impl/log/sinks/terminal.hpp>
-#include <erl/thread.hpp>
+#include <erl/info>
 
 #include <iostream>
 #include "erl/_impl/log/format/log.hpp"

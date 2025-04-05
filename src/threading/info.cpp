@@ -5,7 +5,7 @@
 #include <shared_mutex>
 
 #include <erl/_impl/log/logger.hpp>
-#include <erl/thread.hpp>
+#include <erl/info>
 
 #include "platform/info.h"
 #include <iostream>

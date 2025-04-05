@@ -1,11 +1,11 @@
 #include <thread>
 #include <unordered_map>
-#include <erl/print.hpp>
+#include <erl/print>
 #include <erl/_impl/log/sinks/terminal.hpp>
 #include <erl/_impl/log/format/color.hpp>
-#include <erl/thread.hpp>
-#include <erl/print.hpp>
-#include <erl/logging.hpp>
+#include <erl/info>
+#include <erl/print>
+#include <erl/logging>
 constexpr static auto message_format = 
   "[{timestamp:%H:%M:%S}] [{level:>5}] [{file_name}:{line}:{column}] {message}";
 

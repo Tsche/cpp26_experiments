@@ -5,8 +5,8 @@
 #include <ctime>
 #include <chrono>
 
-#include <erl/clock.hpp>
-#include <erl/thread.hpp>
+#include <erl/time>
+#include <erl/info>
 
 namespace erl::logging {
 struct Location {

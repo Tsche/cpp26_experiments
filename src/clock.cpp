@@ -1,4 +1,4 @@
-#include <erl/clock.hpp>
+#include <erl/time>
 
 namespace erl {
 timestamp_t current_time(){

@@ -1,4 +1,4 @@
-#include <erl/print.hpp>
+#include <erl/print>
 
 struct Foo {
   int x;

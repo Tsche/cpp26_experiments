@@ -3,9 +3,9 @@
 #include <unordered_map>
 
 #include <erl/_impl/net/message/buffer.hpp>
-#include <erl/rpc.hpp>
+#include <erl/rpc>
 #include <erl/_impl/rpc/proxy.hpp>
-#include <erl/clock.hpp>
+#include <erl/time>
 
 #include "sinks/sink.hpp"
 #include "message.hpp"

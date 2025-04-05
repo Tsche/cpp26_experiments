@@ -5,7 +5,7 @@
 #include <experimental/meta>
 
 #include <erl/_impl/util/stamp.hpp>
-#include <erl/tuple.hpp>
+#include <erl/tuple>
 #include <tuple>
 #include <utility>
 

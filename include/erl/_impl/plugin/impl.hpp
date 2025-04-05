@@ -1,7 +1,7 @@
 #pragma once
 #include "cinterface.h"
 #include <erl/version.h>
-#include <erl/autoload.hpp>
+#include <erl/autoload>
 #include <stdexcept>
 
 namespace erl::plugin {
