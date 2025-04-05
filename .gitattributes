@@ -1,4 +1,4 @@
-# *.h linguist-language=cpp
-include/erl/info linguist-language=cpp
+*.h linguist-language=c
+include/erl/* linguist-language=cpp
 
 * text=auto eol=lf
