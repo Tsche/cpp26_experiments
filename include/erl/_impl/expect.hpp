@@ -334,3 +334,8 @@ consteval auto expect(auto expr) {
 }
 
 }  // namespace erl::_expect_impl
+
+namespace erl {
+  using erl::_expect_impl::expect;
+  using erl::_expect_impl::Placeholder;
+}
