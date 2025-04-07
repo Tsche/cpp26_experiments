@@ -320,4 +320,17 @@ struct LazyProxy {
     return [fn](auto&&... args) { return Lazy{fn, erl::Tuple(args...)}; };
   }
 };
+
+template <typename T>
+struct Expect : T {
+  constexpr std::string to_string(std::string_view replacement = "value") const {
+    return T::to_string(std::vector{replacement});
+  }
+};
+
+consteval auto expect(auto expr) {
+  // the point of this function is to be found via ADL
+  return Expect{expr};
+}
+
 }  // namespace erl::_expect_impl

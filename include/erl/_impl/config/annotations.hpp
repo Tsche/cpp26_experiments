@@ -3,6 +3,7 @@
 #include <string_view>
 #include <experimental/meta>
 
+#include <erl/_impl/expect.hpp>
 
 namespace erl::annotations {
 struct Option {};
@@ -26,17 +27,6 @@ struct Description : StringAnnotation {
     using StringAnnotation::StringAnnotation;
 };
 
-template <typename T>
-struct Expect : T {
-  constexpr std::string to_string(std::string_view replacement = "value") const {
-    return T::to_string(std::vector{replacement});
-  }
-};
-
-struct {
-  consteval auto operator()(auto expr) const {
-    return Expect{expr};
-  }
-} constexpr inline expect{};
+using erl::_expect_impl::Expect;
 
 }  // namespace erl::annotations

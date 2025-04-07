@@ -1,0 +1,15 @@
+#include "_impl/config/args.hpp"
+
+namespace erl {
+
+using ::erl::_impl::clap;
+
+template <typename T>
+  requires(std::is_aggregate_v<T> && !std::is_array_v<T>)
+using ArgSpec = ::erl::_impl::Spec<T>;
+
+template <typename T>
+T parse_args(std::vector<std::string_view> args_in) {
+  return ::erl::_impl::parse_args<T>(args_in);
+}
+}

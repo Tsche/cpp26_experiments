@@ -1,4 +1,4 @@
-#include <erl/_impl/config/args.hpp>
+#include <erl/args>
 #include <erl/print>
 
 struct [[= erl::clap::description("Example program.")]] Args : erl::clap {

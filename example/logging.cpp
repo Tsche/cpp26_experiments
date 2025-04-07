@@ -3,7 +3,7 @@
 #include <thread>
 #include <vector>
 
-#include <erl/print>
+#include <erl/logging>
 #include <erl/_impl/log/sinks/terminal.hpp>
 #include <erl/info>
 

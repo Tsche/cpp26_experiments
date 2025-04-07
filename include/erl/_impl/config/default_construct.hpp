@@ -9,7 +9,7 @@
 #include <tuple>
 #include <utility>
 
-namespace erl {
+namespace erl::_impl {
 struct clap;
 
 template <std::meta::info reflection>

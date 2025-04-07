@@ -9,7 +9,7 @@
 
 #include "default_construct.hpp"
 #include "annotations.hpp"
-#include "expect.hpp"
+#include <erl/_impl/expect.hpp>
 
 #include <erl/_impl/util/string.hpp>
 #include <erl/_impl/util/meta.hpp>
@@ -17,7 +17,7 @@
 
 #include <erl/info>
 
-namespace erl {
+namespace erl::_impl {
 template <typename T>
 T parse_value(std::string_view value) {
   // TODO parse more types
@@ -331,7 +331,6 @@ public:
 
 struct clap {
   static constexpr annotations::Option option;
-  static constexpr auto expect = annotations::expect;
   static constexpr auto value  = _expect_impl::Placeholder<0>{};
   static constexpr auto lazy   = _expect_impl::LazyProxy{};
 
