@@ -4,8 +4,8 @@ set(CMAKE_COLOR_DIAGNOSTICS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 26)
-set(CMAKE_CXX_VISIBILITY_PRESET hidden)
-set(CMAKE_VISIBILITY_INLINES_HIDDEN TRUE)
+# set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+# set(CMAKE_VISIBILITY_INLINES_HIDDEN TRUE)
 
 project(erl LANGUAGES CXX)
 
@@ -17,9 +17,7 @@ target_compile_options(erl PUBLIC
   "-fannotation-attributes"
   "-fparameter-reflection"
   "-fexpansion-statements"
-  "-ftime-trace"
   "-Wno-c++26-extensions"
-  "-O0"
 )
 target_link_options(erl PUBLIC "-fexperimental-library" "-stdlib=libc++" "-lc++abi")
 

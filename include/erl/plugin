@@ -7,6 +7,5 @@
 namespace erl {
 using erl::plugin::Plugin;
 
-Plugin load_plugin(std::string_view name);
-// Plugin load_plugin(std::filesystem::path path);
+Plugin load_plugin(std::string_view name, std::filesystem::path base = "");
 }

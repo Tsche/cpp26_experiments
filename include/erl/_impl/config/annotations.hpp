@@ -6,7 +6,7 @@
 #include <erl/_impl/expect.hpp>
 
 namespace erl::annotations {
-struct Option {};
+constexpr inline struct Option {} option {};
 
 struct StringAnnotation {
   char const* data;

@@ -10,7 +10,7 @@
 #include <utility>
 
 namespace erl::_impl {
-struct clap;
+struct CLI;
 
 template <std::meta::info reflection>
 consteval std::meta::info make_arg_tuple() {
@@ -104,11 +104,14 @@ consteval std::size_t required_args_count(std::meta::info reflection) {
 template <std::meta::info T>
 constexpr inline std::size_t required_arg_count = _default_impl::required_args_count(T);
 
+
 template <typename T>
+  requires (std::is_aggregate_v<T> && !std::is_array_v<T>)
 T default_construct(ArgumentTuple<T> const& args) {
   return _default_impl::visit<required_arg_count<dealias(^^T)>, T>(
       [&]<std::size_t... Idx>(std::index_sequence<Idx...>) {
-        if constexpr (std::derived_from<T, clap>) {
+        if constexpr (meta::base_count<T> != 0) {
+          // TODO: handle more than one base and possibly non-empty bases?
           return T{{}, *get<Idx>(args)...};
         } else {
           return T{*get<Idx>(args)...};

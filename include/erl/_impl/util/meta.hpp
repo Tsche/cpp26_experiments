@@ -8,6 +8,10 @@
 #include "string.hpp"
 
 namespace erl::meta {
+
+template <typename T>
+constexpr inline std::size_t base_count = bases_of(^^T).size();
+
 template <typename T>
 consteval T instantiate(std::meta::info target_template,
                         std::same_as<std::meta::info> auto... template_arguments) {
@@ -83,7 +87,7 @@ consteval bool has_annotation(std::meta::info item, T const& value) {
   if (!has_annotation<T>(item)) {
     return false;
   }
-  auto annotations = annotations_of(item, ^^T);
+  auto annotations = annotations_of(item, dealias(^^T));
   auto value_r     = std::meta::reflect_value(value);
   return std::ranges::any_of(annotations, [&](auto annotation) { return annotation == value_r; });
 }

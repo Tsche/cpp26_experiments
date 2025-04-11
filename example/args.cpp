@@ -1,9 +1,9 @@
 #include <erl/args>
 #include <erl/print>
 
-struct [[= erl::clap::description("Example program.")]] Args : erl::clap {
+struct [[= erl::CLI::description("Example program.")]] Args : erl::CLI {
   std::string text;
-  [[=expect(2 < value && value < 10)]] 
+  [[=expect(2 < value < 17)]] 
   int times = 5;
 
   [[= option]] 

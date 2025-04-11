@@ -275,7 +275,7 @@ class FormatParser : util::Parser {
 
     std::vector<std::meta::info> direct_indices;
     if (has_positional) {
-      direct_indices = std::vector{idx...} |
+      direct_indices = std::vector<std::size_t>{idx...} |
                        std::views::filter([&](auto x) { return direct[x] != -1; }) |
                        std::views::transform([](auto x) { return std::meta::reflect_value(x); }) |
                        std::ranges::to<std::vector>();

@@ -1,1 +1,0 @@
-target_sources(kwargs_tests PRIVATE simple.cpp)

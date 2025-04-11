@@ -1,0 +1,46 @@
+#pragma once
+#include "_impl/expect.hpp"
+
+namespace erl {
+
+namespace _optional_impl {
+template <typename T>
+struct Storage{
+  // fallback if we don't have a tombstone
+  union {
+    char null_state; // avoids default-constructibility requirement on T
+    T value;
+  };
+
+  bool engaged;
+};
+
+consteval bool has_tombstone_impl(std::meta::info r) {
+  return false;
+}
+
+template <typename T>
+concept has_tombstone = has_tombstone_impl(dealias(^^T));
+
+template <has_tombstone T>
+struct Storage<T> {
+  T value;
+};
+
+template <typename T>
+struct Storage<T&> {
+  T* value;
+};
+}
+
+template <typename T, auto>
+using Tombstone = T;
+
+template <typename T>
+class Optional {
+  _optional_impl::Storage<T> storage;
+
+public:
+};
+
+}

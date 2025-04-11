@@ -5,7 +5,7 @@ function(DEFINE_EXAMPLE TARGET)
   target_link_libraries(${TARGET} PRIVATE erl)
 endfunction()
 
-define_example(logging)
+# define_example(logging)
 define_example(args)
 define_example(rpc)
 define_example(format)

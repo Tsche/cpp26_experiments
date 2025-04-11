@@ -2,15 +2,13 @@
 #include <experimental/meta>
 
 #include <concepts>
-#include <stdexcept>
-#include <string>
 #include <format>
+#include <string>
 
-#include <erl/tuple>
-#include <erl/_impl/util/string.hpp>
 #include <erl/_impl/util/concepts.hpp>
 #include <erl/_impl/util/meta.hpp>
 #include <erl/_impl/util/operators.hpp>
+#include <erl/_impl/util/string.hpp>
 
 namespace erl::_expect_impl {
 template <typename T>
@@ -27,98 +25,98 @@ consteval auto consteval_wrap(T const& value) {
 template <typename T>
 using wrapped_t = decltype(consteval_wrap(std::declval<T>()));
 
-template <typename T, int rank>
-concept has_higher_rank = !requires { T::rank; } || T::rank < rank;
+struct Operator {
+  std::meta::operators op;
 
-#define $make_op(class_name, op)                                                                 \
-  template <typename T>                                                                          \
-  constexpr friend auto operator op(class_name rhs_, T lhs_)                                     \
-    requires(has_higher_rank<T, rank>)                                                           \
-  {                                                                                              \
-    if consteval {                                                                               \
-      return BinaryExpr<util::to_operator(#op), class_name, wrapped_t<T>>{rhs_,                  \
-                                                                          consteval_wrap(lhs_)}; \
-    } else {                                                                                     \
-      return BinaryExpr<util::to_operator(#op), class_name, T>{rhs_, lhs_};                      \
-    }                                                                                            \
-  }                                                                                              \
-  template <typename T>                                                                          \
-  constexpr friend auto operator op(T rhs_, class_name lhs_)                                     \
-    requires(has_higher_rank<T, rank * 2>)                                                       \
-  {                                                                                              \
-    if consteval {                                                                               \
-      return BinaryExpr<util::to_operator(#op), wrapped_t<T>, class_name>{consteval_wrap(rhs_),  \
-                                                                          lhs_};                 \
-    } else {                                                                                     \
-      return BinaryExpr<util::to_operator(#op), T, class_name>{rhs_, lhs_};                      \
-    }                                                                                            \
+  Operator() = delete;
+  constexpr Operator(std::convertible_to<std::string_view> auto str) : op(util::to_operator(str)) {}
+  constexpr Operator(std::meta::operators op) : op(op) {}
+  constexpr ~Operator() {}
+
+  constexpr operator std::meta::operators() const { return op; }
+};
+
+constexpr bool matches(std::meta::operators op, std::convertible_to<Operator> auto... operators) {
+  auto [... needle] = std::array{operators...};
+  return ((op == Operator(needle)) || ...);
+}
+
+constexpr bool is_comparison(std::meta::operators op) {
+  using namespace erl::util;
+  // spaceship not supported
+  return matches(op, "<", "<=", ">", ">=", "==", "!=");
+}
+
+template <std::meta::operators OP, typename R, typename L>
+struct BinaryExpr;
+
+template <Operator OP, typename R, typename L>
+constexpr auto make_expr(R rhs_, L lhs_) {
+  return BinaryExpr<OP, R, L>{rhs_, lhs_};
+}
+
+template <typename T>
+concept is_binary_expr = util::is_specialization<T, ^^BinaryExpr>;
+
+template <typename T>
+concept is_binary_comparison = is_binary_expr<T> && is_comparison(T::op);
+
+template <std::meta::operators OP, typename R, typename L>
+struct BinaryExpr {
+  static constexpr auto op = OP;
+  R rhs;
+  L lhs;
+
+  constexpr auto get_left_most() const {
+    if constexpr (util::is_specialization<L, ^^BinaryExpr>) {
+      return lhs.get_left_most();
+    } else {
+      return lhs;
+    }
   }
 
-template <std::meta::operators OP, typename Rhs, typename Lhs>
-struct BinaryExpr {
-  static constexpr auto rank = 3;
-
-  Rhs rhs;
-  Lhs lhs;
-
-  // comparisons
-  $make_op(BinaryExpr, <);
-  $make_op(BinaryExpr, <=);
-  $make_op(BinaryExpr, >);
-  $make_op(BinaryExpr, >=);
-  $make_op(BinaryExpr, ==);
-  $make_op(BinaryExpr, !=);
-
-  // logical
-  $make_op(BinaryExpr, &&);
-  $make_op(BinaryExpr, ||);
+  constexpr auto get_right_most() const {
+    if constexpr (util::is_specialization<R, ^^BinaryExpr>) {
+      return rhs.get_right_most();
+    } else {
+      return rhs;
+    }
+  }
 
   decltype(auto) eval(auto const& args) const {
-    static constexpr bool rhs_evaluatable = requires {
-      { rhs.eval(args) } -> util::is_non_void;
+    auto descend = [&](auto&& obj) {
+      constexpr auto evaluatable = requires {
+        { obj.eval(args) } -> util::is_non_void;
+      };
+
+      if constexpr (evaluatable) {
+        return obj.eval(args);
+      } else {
+        return obj;
+      }
     };
-    static constexpr bool lhs_evaluatable = requires {
-      { lhs.eval(args) } -> util::is_non_void;
-    };
-    if constexpr (rhs_evaluatable && lhs_evaluatable) {
-      return eval_operator(rhs.eval(args), lhs.eval(args));
-    } else if constexpr (rhs_evaluatable) {
-      return eval_operator(rhs.eval(args), lhs);
-    } else if constexpr (lhs_evaluatable) {
-      return eval_operator(rhs, lhs.eval(args));
-    }
+
+    return eval_operator(descend(rhs), descend(lhs));
   }
 
   auto eval_verbose(auto const& args, std::vector<std::string>& failed_terms) const {
-    static constexpr bool rhs_evaluatable = requires {
-      { rhs.eval_verbose(args, failed_terms) } -> util::is_non_void;
+    auto descend = [&](auto&& obj) {
+      constexpr auto evaluatable = requires {
+        { obj.eval_verbose(args, failed_terms) } -> util::is_non_void;
+      };
+
+      if constexpr (evaluatable) {
+        return obj.eval_verbose(args, failed_terms);
+      } else {
+        return obj;
+      }
     };
-    static constexpr bool lhs_evaluatable = requires {
-      { lhs.eval_verbose(args, failed_terms) } -> util::is_non_void;
-    };
-    if constexpr (rhs_evaluatable && lhs_evaluatable) {
-      auto rhs_   = rhs.eval_verbose(args, failed_terms);
-      auto lhs_   = lhs.eval_verbose(args, failed_terms);
-      auto result = eval_operator(rhs_, lhs_);
-      if (!result) {
-        failed_terms.push_back(to_string(args));
-      }
-      return result;
-    } else if constexpr (rhs_evaluatable) {
-      auto rhs_   = rhs.eval_verbose(args, failed_terms);
-      auto result = eval_operator(rhs_, lhs);
-      if (!result) {
-        failed_terms.push_back(to_string(args));
-      }
-      return result;
-    } else if constexpr (lhs_evaluatable) {
-      auto lhs_   = lhs.eval_verbose(args, failed_terms);
-      auto result = eval_operator(rhs, lhs_);
-      if (!result) {
-        failed_terms.push_back(to_string(args));
-      }
-      return result;
+
+    auto result = eval_operator(descend(rhs), descend(lhs));
+    if (!result) {
+      failed_terms.push_back(to_string(args));
     }
+    return result;
   }
 
   std::string to_string(auto const& args) const {
@@ -131,7 +129,10 @@ struct BinaryExpr {
     };
 
     if constexpr (rhs_printable && lhs_printable) {
-      return std::format("({} {} {})", rhs.to_string(args), util::to_string(OP), lhs.to_string(args));
+      return std::format("({} {} {})",
+                         rhs.to_string(args),
+                         util::to_string(OP),
+                         lhs.to_string(args));
     } else if constexpr (rhs_printable) {
       return std::format("({} {} {})", rhs.to_string(args), util::to_string(OP), lhs);
     } else if constexpr (lhs_printable) {
@@ -148,11 +149,14 @@ struct BinaryExpr {
     };
 
     if constexpr (rhs_printable && lhs_printable) {
-      return std::string("(") + rhs.to_string(replacements) + " " + util::to_string(OP) + " " + lhs.to_string(replacements) + ")";
+      return std::string("(") + rhs.to_string(replacements) + " " + util::to_string(OP) + " " +
+             lhs.to_string(replacements) + ")";
     } else if constexpr (rhs_printable) {
-      return std::string("(") + rhs.to_string(replacements) + " " + util::to_string(OP) + " " + util::to_string(lhs) + ")";
+      return std::string("(") + rhs.to_string(replacements) + " " + util::to_string(OP) + " " +
+             util::to_string(lhs) + ")";
     } else if constexpr (lhs_printable) {
-      return std::string("(") + util::to_string(rhs) + " " + util::to_string(OP) + " " + lhs.to_string(replacements) + ")";
+      return std::string("(") + util::to_string(rhs) + " " + util::to_string(OP) + " " +
+             lhs.to_string(replacements) + ")";
     }
   }
 
@@ -222,24 +226,29 @@ struct BinaryExpr {
       return lhs, rhs;
     }
   }
+
+  constexpr auto transform() const {
+    return *this;
+  }
+
+  constexpr auto transform() const requires is_binary_comparison<BinaryExpr> {
+    if constexpr (is_binary_comparison<R> && is_binary_comparison<L>) {
+        return make_expr<"&&">(
+          make_expr<"&&">(rhs.transform(),
+                          make_expr<op>(rhs.get_left_most(), lhs.get_right_most())),
+          lhs.transform());
+    } else if constexpr (is_binary_comparison<R>) {
+      return make_expr<"&&">(rhs.transform(), make_expr<op>(rhs.get_left_most(), lhs));
+    } else if constexpr (is_binary_comparison<L>) {
+      return make_expr<"&&">(make_expr<op>(rhs, lhs.get_right_most()), lhs.transform());
+    } else {
+      return *this;
+    }
+  }
 };
 
 template <std::size_t Idx>
 struct Placeholder {
-  static constexpr auto rank = 1;
-
-  // comparisons
-  $make_op(Placeholder, <);
-  $make_op(Placeholder, <=);
-  $make_op(Placeholder, >);
-  $make_op(Placeholder, >=);
-  $make_op(Placeholder, ==);
-  $make_op(Placeholder, !=);
-
-  // logical
-  $make_op(Placeholder, &&);
-  $make_op(Placeholder, ||);
-
   decltype(auto) eval(auto const& args) const {
     static constexpr auto placeholder_count =
         std::tuple_size_v<std::remove_cvref_t<decltype(args)>>;
@@ -252,7 +261,7 @@ struct Placeholder {
     return eval(args);
   }
 
-  std::string to_string(auto const& args) const { 
+  std::string to_string(auto const& args) const {
     // TODO constexpr
     return std::format("{}", get<Idx>(args));
   }
@@ -264,22 +273,8 @@ struct Placeholder {
 
 template <typename F, typename... Args>
 struct Lazy {
-  static constexpr auto rank = 2;
-
   F callable;
   std::tuple<Args...> arguments;
-
-  // comparisons
-  $make_op(Lazy, <);
-  $make_op(Lazy, <=);
-  $make_op(Lazy, >);
-  $make_op(Lazy, >=);
-  $make_op(Lazy, ==);
-  $make_op(Lazy, !=);
-
-  // logical
-  $make_op(Lazy, &&);
-  $make_op(Lazy, ||);
 
   template <std::size_t Idx, bool verbose = false>
   decltype(auto) expand_args(auto const& args, std::vector<std::string>& failed_terms) const {
@@ -304,25 +299,81 @@ struct Lazy {
   }
 
   constexpr std::string to_string(auto const& args) const { return "<lazy call>"; }
-  constexpr std::string to_string(std::vector<std::string_view> const&) const { return "<lazy call>"; }
-};
-
-#define LAZY_ARGS(...)    \
-  erl::Tuple(__VA_ARGS__) \
-  }
-#define $(fnc) \
-  Lazy {       \
-    []<typename... Ts>(Ts&&... args) { return fnc(std::forward<Ts>(args)...); }, LAZY_ARGS
-
-struct LazyProxy {
-  template <typename Fn>
-  constexpr auto operator()(Fn fn) const {
-    return [fn](auto&&... args) { return Lazy{fn, erl::Tuple(args...)}; };
+  constexpr std::string to_string(std::vector<std::string_view> const&) const {
+    return "<lazy call>";
   }
 };
 
 template <typename T>
+concept is_expr_tree =
+    util::is_specialization<T, ^^BinaryExpr> || util::is_specialization<T, ^^Placeholder> ||
+    util::is_specialization<T, ^^Lazy>;
+
+#define $make_op(op)                                                           \
+  template <typename T>                                                        \
+    requires(!is_expr_tree<T>)                                                 \
+  constexpr auto operator op(is_expr_tree auto rhs_, T lhs_) {                 \
+    if consteval {                                                             \
+      return make_expr<#op>(rhs_, consteval_wrap(lhs_));                       \
+    } else {                                                                   \
+      return make_expr<#op>(rhs_, lhs_);                                       \
+    }                                                                          \
+  }                                                                            \
+  template <typename T>                                                        \
+    requires(!is_expr_tree<T>)                                                 \
+  constexpr auto operator op(T rhs_, is_expr_tree auto lhs_) {                 \
+    if consteval {                                                             \
+      return make_expr<#op>(consteval_wrap(rhs_), lhs_);                       \
+    } else {                                                                   \
+      return make_expr<#op>(rhs_, lhs_);                                       \
+    }                                                                          \
+  }                                                                            \
+  constexpr auto operator op(is_expr_tree auto rhs_, is_expr_tree auto lhs_) { \
+    return make_expr<#op>(rhs_, lhs_);                                         \
+  }
+
+$make_op(<);
+$make_op(<=);
+$make_op(>);
+$make_op(>=);
+$make_op(==);
+$make_op(!=);
+
+$make_op(&&);
+$make_op(||);
+
+$make_op(/);
+$make_op(*);
+$make_op(%);
+$make_op(+);
+$make_op(-);
+
+$make_op(<<);
+$make_op(>>);
+
+template <typename... Args>
+struct FunctionArgs {
+  std::tuple<Args...> args;
+
+  template <typename F>
+  friend constexpr auto operator%(F fnc, FunctionArgs partial) {
+    return Lazy{fnc, partial.args};
+  }
+};
+
+auto lazy(auto... args) {
+  return FunctionArgs{std::tuple{args...}};
+}
+
+template <typename T>
 struct Expect : T {
+  constexpr auto transform() {
+    if constexpr (util::is_specialization<T, ^^BinaryExpr>) {
+      return erl::_expect_impl::Expect{T::transform()};
+    } else {
+      return *this;
+    }
+  }
   constexpr std::string to_string(std::string_view replacement = "value") const {
     return T::to_string(std::vector{replacement});
   }
@@ -330,12 +381,32 @@ struct Expect : T {
 
 consteval auto expect(auto expr) {
   // the point of this function is to be found via ADL
-  return Expect{expr};
+  return Expect{expr}.transform();
 }
 
 }  // namespace erl::_expect_impl
 
+#define $lazy(fnc)                                                              \
+  [](auto... args) {                                                            \
+    return erl::_expect_impl::Lazy{[](auto... args_) { return fnc(args_...); }, \
+                                   std::tuple{args...}};                        \
+  }
+
 namespace erl {
-  using erl::_expect_impl::expect;
-  using erl::_expect_impl::Placeholder;
-}
+using erl::_expect_impl::expect;
+using erl::_expect_impl::Placeholder;
+
+namespace placeholders {
+constexpr inline Placeholder<0> _0{};
+constexpr inline Placeholder<1> _1{};
+constexpr inline Placeholder<2> _2{};
+constexpr inline Placeholder<3> _3{};
+constexpr inline Placeholder<4> _4{};
+constexpr inline Placeholder<5> _5{};
+constexpr inline Placeholder<6> _6{};
+constexpr inline Placeholder<7> _7{};
+constexpr inline Placeholder<8> _8{};
+constexpr inline Placeholder<9> _9{};
+
+}  // namespace placeholders
+}  // namespace erl

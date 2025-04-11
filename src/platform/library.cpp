@@ -79,7 +79,7 @@ void* resolve_symbol(void* handle, std::string_view name) {
   void* addr = ::dlsym(handle, std::string{name}.c_str());
 #endif
 
-  if (handle == nullptr) {
+  if (addr == nullptr) {
     throw LibraryError(get_last_error());
   }
   return addr;

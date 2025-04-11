@@ -257,7 +257,7 @@ struct Option {
   }
 };
 
-struct clap;
+struct CLI;
 
 template <typename T>
   requires(std::is_aggregate_v<T> && !std::is_array_v<T>)
@@ -283,9 +283,9 @@ private:
       }
     }
 
-    if constexpr (std::derived_from<T, clap>) {
+    if constexpr (std::derived_from<T, CLI>) {
       for (auto fnc_template :
-           members_of(^^clap) | std::views::filter(std::meta::is_function_template)) {
+           members_of(^^CLI) | std::views::filter(std::meta::is_function_template)) {
         if (!can_substitute(fnc_template, {^^T})) {
           continue;
         }
@@ -329,10 +329,9 @@ public:
 
 
 
-struct clap {
+struct CLI {
   static constexpr annotations::Option option;
   static constexpr auto value  = _expect_impl::Placeholder<0>{};
-  static constexpr auto lazy   = _expect_impl::LazyProxy{};
 
   using shorthand   = annotations::Shorthand;
   using description = annotations::Description;
@@ -364,10 +363,11 @@ struct clap {
 
     std::println("\nOptions:");
 
-    auto name_length = [](Option<T> opt) { return std::strlen(opt.name); };
-    std::size_t max_name_length =
-        std::max(std::ranges::max(spec.commands | std::views::transform(name_length)),
-                 std::ranges::max(spec.options | std::views::transform(name_length)));
+    auto name_length = [](Option<T> const& opt) { return std::strlen(opt.name); };
+    auto safe_max = [&](std::span<Option<T> const> const& opts){ 
+      return opts.empty() ? 0 : std::ranges::max(opts | std::views::transform(name_length));
+    };
+    std::size_t max_name_length = std::max(safe_max(spec.commands), safe_max(spec.options));
 
     auto print_option = [&](Option<T> opt) {
       std::string params;
