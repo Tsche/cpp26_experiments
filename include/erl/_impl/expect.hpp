@@ -16,7 +16,7 @@ consteval auto consteval_wrap(T const& value) {
   // this hack is required to compare against string literals
   // in expect annotations
   if constexpr (std::convertible_to<T, std::string_view>) {
-    return std::meta::define_static_string(value);
+    return std::define_static_string(value);
   } else {
     return value;
   }

@@ -15,4 +15,4 @@ target_link_libraries(demo_plugin PRIVATE erl)
 
 define_example(plugin)
 
-define_example(modules)
+# define_example(modules)

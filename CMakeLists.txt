@@ -28,7 +28,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(erl PUBLIC Threads::Threads)
 
-add_subdirectory(modules)
+# add_subdirectory(modules)
 add_subdirectory(src)
 
 target_include_directories(erl PUBLIC 

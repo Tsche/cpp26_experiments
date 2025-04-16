@@ -2,7 +2,101 @@
 
 namespace erl {
 
-using ::erl::_impl::CLI;
+struct CLI {
+  static constexpr annotations::Option option;
+  static constexpr auto value = _expect_impl::Placeholder<0>{};
+
+  using shorthand   = annotations::Shorthand;
+  using description = annotations::Description;
+
+  template <typename T>
+  [[= option]] [[noreturn]]
+  static void help() {
+    constexpr static _impl::Spec<std::remove_cvref_t<T>> spec{};
+    auto program_name = Program::name();
+    std::string arguments{};
+    for (auto argument : spec.arguments) {
+      if (argument.optional) {
+        arguments += std::format("[{}] ", argument.name);
+      } else {
+        arguments += std::format("{} ", argument.name);
+      }
+    }
+    std::println("usage: {} {}", program_name, arguments);
+
+    if (auto desc = annotation_of_type<annotations::Description>(^^T); desc) {
+      std::println("\n{}", desc->data);
+    }
+
+    std::println("\nArguments:");
+    for (auto argument : spec.arguments) {
+      std::string constraint =
+          argument.constraint ? std::format("\n{:<8}requires: {}", "", argument.constraint) : "";
+      std::println("    {} -> {}{}", argument.name, argument.type, constraint);
+    }
+
+    std::println("\nOptions:");
+
+    auto name_length = [](_impl::Option const& opt) { return std::strlen(opt.name); };
+    auto safe_max    = [&](std::span<_impl::Option const> const& opts) {
+      return opts.empty() ? 0 : std::ranges::max(opts | std::views::transform(name_length));
+    };
+    std::size_t max_name_length = std::max(safe_max(spec.commands), safe_max(spec.options));
+
+    auto print_option = [&](_impl::Option opt) {
+      std::string params;
+      bool has_constraints = false;
+      for (std::size_t idx = 0; idx < opt.argument_count; ++idx) {
+        if (opt.arguments[idx].optional) {
+          params += std::format("[{}] ", opt.arguments[idx].name);
+        } else {
+          params += std::format("{} ", opt.arguments[idx].name);
+        }
+        if (opt.arguments[idx].constraint != nullptr) {
+          has_constraints = true;
+        }
+      }
+
+      std::println("    --{} {}", opt.name, params);
+      std::size_t offset = max_name_length + 4 + 4;
+      if (opt.description) {
+        std::println("{:<{}}{}\n", "", offset, opt.description);
+      }
+
+      if (opt.argument_count != 0) {
+        std::println("{:<{}}Arguments:", "", offset);
+        for (std::size_t idx = 0; idx < opt.argument_count; ++idx) {
+          std::string constraint = opt.arguments[idx].constraint
+                                       ? std::format("\n{:<{}}requires: {}",
+                                                     "",
+                                                     offset + 8,
+                                                     opt.arguments[idx].constraint)
+                                       : "";
+          char const* optional   = "";
+          if (opt.arguments[idx].optional) {
+            optional = " (optional)";
+          }
+          std::println("{:<{}}{} -> {}{}{}",
+                       "",
+                       offset + 4,
+                       opt.arguments[idx].name,
+                       opt.arguments[idx].type,
+                       optional,
+                       constraint);
+        }
+      }
+    };
+
+    for (auto command : spec.commands) {
+      print_option(command);
+    }
+
+    for (auto opt : spec.options) {
+      print_option(opt);
+    }
+    std::exit(0);
+  }
+};
 
 template <typename T>
   requires(std::is_aggregate_v<T> && !std::is_array_v<T>)
@@ -12,4 +106,4 @@ template <typename T>
 T parse_args(std::vector<std::string_view> args_in) {
   return ::erl::_impl::parse_args<T>(args_in);
 }
-}
+}  // namespace erl
