@@ -27,4 +27,15 @@ concept is_void = std::is_void_v<T>;
 template<typename T>
 concept is_non_void = !is_void<T>;
 
+template <std::meta::info R>
+concept is_function = std::meta::is_function(R);
+
+template <std::meta::info R>
+concept is_member_function = is_function<R> && is_class_member(R);
+
+template <std::meta::info R>
+concept is_static_member_function = is_member_function<R> && is_static_member(R);
+
+template <std::meta::info R>
+concept is_nonstatic_member_function = is_member_function<R> && !is_static_member(R);
 }  // namespace erl::util

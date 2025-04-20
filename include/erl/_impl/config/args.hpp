@@ -9,11 +9,16 @@
 
 #include "default_construct.hpp"
 #include "annotations.hpp"
+#include "erl/_impl/util/concepts.hpp"
+
+#include <erl/_impl/compat/p1789.hpp>
 #include <erl/_impl/expect.hpp>
 
 #include <erl/_impl/util/string.hpp>
 #include <erl/_impl/util/meta.hpp>
 #include <erl/_impl/log/format/color.hpp>
+
+#include <erl/_impl/compile_error.hpp>
 
 #include <erl/info>
 
@@ -173,23 +178,12 @@ struct Option {
       for (auto arg : arguments) {
         arg(&arg_tuple);
       }
-
-      if constexpr (is_function(R)) {
-        default_invoke<required_arg_count<R>, [:type_of(R):]>(
-            [&]<typename... Args>(Args&&... args) {
-              if constexpr (is_static_member(R)) {
-                [:R:](std::forward<Args>(args)...);
-              } else {
-                static_cast<[:parent_of(R):]*>(obj) -> [:R:](std::forward<Args>(args)...);
-              }
-            },
-            arg_tuple);
+      if constexpr (util::is_nonstatic_member_function<R>) {
+        default_invoke<R>(*static_cast<[:parent_of(R):]*>(obj), arg_tuple);
+      } else if constexpr (is_function(R)) {
+        default_invoke<R>(arg_tuple);
       } else if constexpr (is_object_type(type_of(R))) {
-        default_invoke<required_arg_count<R>, [:type_of(R):]>(
-            [&]<typename Arg>(Arg&& arg) {
-              static_cast<[:parent_of(R):]*>(obj) -> [:R:] = std::forward<Arg>(arg);
-            },
-            arg_tuple);
+        static_cast<[:parent_of(R):]*>(obj)->[:R:] = *get<0>(arg_tuple);
       } else {
         static_assert(false, "Unsupported handler type.");
       }
@@ -204,15 +198,21 @@ struct Option {
       if (arg_name != name) {
         return false;
       }
-      ++parser.cursor;
+      ++parser.cursor; // parser will not unwind after this point
+      
+      bool contd = true;
+      [:meta::sequence(sizeof...(args)):] >>= [&]<auto Idx>{
+        if (!contd) {
+          return;
+        }
 
-      [:meta::sequence(sizeof...(args)):] >>= [&]<auto Idx> {
         Argument::Unevaluated argument;
         if ((argument.*args...[Idx].parse)(parser)) {
           arguments.push_back(argument);
         } else {
           if (!args...[Idx].optional) {
             parser.fail("Missing argument {} of option {}", args...[Idx].name, arg_name);
+            contd = false;
           }
         }
       };
@@ -260,133 +260,153 @@ struct Option {
 
 struct CLI;
 
-template <typename T>
-  requires(std::is_aggregate_v<T> && !std::is_array_v<T>)
-class Spec {
-private:
-  consteval auto get_arguments() {
-    std::vector<Argument> fields;
-    std::size_t idx = 0;
-    for (auto member : nonstatic_data_members_of(^^T)) {
-      // TODO handle descend
-      if (!meta::has_annotation<annotations::Option>(member)) {
-        fields.emplace_back(idx++, member);
-      }
-    }
-    return fields;
-  }
+struct Spec {
+  struct Parser {
+    std::vector<Argument> arguments;
+    std::vector<Option> commands;
+    std::vector<Option> options;
+    // subspec for subcommands?
 
-  consteval auto get_commands() {
-    std::vector<Option> fields;
-
-    for (auto static_fnc : meta::static_member_functions_of(^^T)) {
-      if (meta::has_annotation<annotations::Option>(static_fnc)) {
-        fields.emplace_back(identifier_of(static_fnc), static_fnc);
-      }
-    }
-
-    if constexpr (std::derived_from<T, CLI>) {
-      for (auto fnc_template :
-           members_of(^^CLI) | std::views::filter(std::meta::is_function_template)) {
-        if (!can_substitute(fnc_template, {^^T})) {
+    consteval void parse(std::meta::info r) {
+      for (auto member : members_of(r)) {
+        if (!is_public(member) || !has_identifier(member)) {
           continue;
         }
+        (void)(parse_argument(member) || parse_command(member) || parse_option(member));
+      }
+    }
 
-        auto fnc = substitute(fnc_template, {^^T});
-        if (meta::has_annotation<annotations::Option>(fnc)) {
-          fields.emplace_back(identifier_of(fnc_template), fnc);
+    consteval void parse_base(std::meta::info r) {
+      if (meta::is_derived_from(r, ^^CLI)) {
+        for (auto fnc_template :
+             members_of(^^CLI) | std::views::filter(std::meta::is_function_template)) {
+          if (!can_substitute(fnc_template, {r})) {
+            continue;
+          }
+
+          auto fnc = substitute(fnc_template, {r});
+          if (meta::has_annotation<annotations::Option>(fnc)) {
+            commands.emplace_back(identifier_of(fnc_template), fnc);
+          }
         }
       }
     }
-    return fields;
-  }
 
-  consteval auto get_options() {
-    std::vector<Option> fields;
-    for (auto member : nonstatic_data_members_of(^^T)) {
-      if (meta::has_annotation<annotations::Option>(member) &&
-          has_default_member_initializer(member)) {
-        fields.emplace_back(identifier_of(member), member);
+    consteval bool parse_argument(std::meta::info r) {
+      if (!is_nonstatic_data_member(r)) {
+        return false;
+      }
+
+      if (meta::has_annotation(r, ^^annotations::Option) ||
+          meta::has_annotation(r, ^^annotations::Descend)) {
+        return false;
+      }
+
+      arguments.emplace_back(arguments.size(), r);
+      return true;
+    }
+
+    consteval bool parse_command(std::meta::info r) {
+      if (is_function(r) && is_static_member(r)) {
+        if (meta::has_annotation(r, ^^annotations::Option)) {
+          commands.emplace_back(identifier_of(r), r);
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    consteval bool parse_option(std::meta::info r) {
+      if (!meta::has_annotation(r, ^^annotations::Option)) {
+        return false;
+      }
+
+      if (is_nonstatic_data_member(r)) {
+        if (!has_default_member_initializer(r)) {
+          compile_error(std::string("Option ") + identifier_of(r) + " lacks a default member initializer.");
+        }
+      } else if (!is_function(r) || is_static_member(r)){
+        return false;
+      }
+
+      options.emplace_back(identifier_of(r), r);
+      return true;
+    }
+    };
+
+    std::span<Argument const> arguments;
+    std::span<Option const> commands;
+    std::span<Option const> options;
+
+    consteval explicit Spec(std::meta::info r) {
+      auto parser = Parser();
+      parser.parse(r);
+      parser.parse_base(r);
+      arguments = define_static_array(parser.arguments);
+      commands  = define_static_array(parser.commands);
+      options   = define_static_array(parser.options);
+    }
+  };
+
+  template <typename T>
+  T parse_args(std::vector<std::string_view> args_in) {
+    static constexpr Spec spec{^^T};
+    auto parser          = ArgParser{args_in};
+    auto& [args, cursor] = parser;
+
+    Program::set_name(args[0]);
+    cursor = 1;
+
+    std::vector<Argument::Unevaluated> parsed_args{};
+    for (auto Arg : spec.arguments) {
+      Argument::Unevaluated argument{};
+      if ((argument.*Arg.parse)(parser)) {
+        parsed_args.push_back(argument);
+      } else {
+        break;
       }
     }
 
-    for (auto fnc : meta::nonstatic_member_functions_of(^^T)) {
-      if (meta::has_annotation<annotations::Option>(fnc)) {
-        fields.emplace_back(identifier_of(fnc), fnc);
+    std::vector<typename Option::Unevaluated> parsed_opts{};
+    auto [... Cmds] = [:meta::expand(spec.commands):];
+    auto [... Opts] = [:meta::expand(spec.options):];
+
+    while (parser.valid()) {
+      bool found = false;
+      typename Option::Unevaluated option{};
+
+      if (((option.*Cmds.parse)(parser) || ...)) {
+        // run commands right away
+        option(nullptr);
+        continue;
+      }
+
+      found = ((option.*Opts.parse)(parser) || ...);
+      if (!found) {
+        parser.fail("Could not find option `{}`", parser.current());
+      }
+      parsed_opts.push_back(option);
+    }
+
+    ArgumentTuple<T> args_tuple;
+    for (auto argument : parsed_args) {
+      argument(&args_tuple);
+    }
+
+    for (auto arg : spec.arguments | std::views::drop(parsed_args.size())) {
+      if (!arg.optional) {
+        parser.fail("Missing required argument `{}`", arg.name);
       }
     }
-    return fields;
-  }
 
-public:
-  std::span<Argument const> arguments;  // arguments required or usable to construct T
-  std::span<Option const> commands;  // options that do not require a T
-  std::span<Option const> options;   // regular options
+    T object = default_construct<T>(args_tuple);
 
-  consteval Spec()
-      : arguments(std::define_static_array(get_arguments()))
-      , commands(std::define_static_array(get_commands()))
-      , options(std::define_static_array(get_options())) {}
-};
-
-template <typename T>
-T parse_args(std::vector<std::string_view> args_in) {
-  static constexpr Spec<T> spec{};
-  auto parser          = ArgParser{args_in};
-  auto& [args, cursor] = parser;
-
-  Program::set_name(args[0]);
-  cursor = 1;
-
-  std::vector<Argument::Unevaluated> parsed_args{};
-  for (auto Arg : spec.arguments) {
-    Argument::Unevaluated argument{};
-    if ((argument.*Arg.parse)(parser)) {
-      parsed_args.push_back(argument);
-    } else {
-      break;
-    }
-  }
-
-  std::vector<typename Option::Unevaluated> parsed_opts{};
-  auto [... Cmds] = [:meta::expand(spec.commands):];
-  auto [... Opts] = [:meta::expand(spec.options):];
-
-  while (parser.valid()) {
-    bool found = false;
-    typename Option::Unevaluated option{};
-
-    if (((option.*Cmds.parse)(parser) || ...)) {
-      // run commands right away
-      option(nullptr);
-      continue;
+    // run options
+    for (auto&& option : parsed_opts) {
+      option(&object);
     }
 
-    found = ((option.*Opts.parse)(parser) || ...);
-    if (!found) {
-      parser.fail("Could not find option `{}`", parser.current());
-    }
-    parsed_opts.push_back(option);
+    return object;
   }
-
-  ArgumentTuple<T> args_tuple;
-  for (auto argument : parsed_args) {
-    argument(&args_tuple);
-  }
-
-  for (auto arg : spec.arguments | std::views::drop(parsed_args.size())) {
-    if (!arg.optional) {
-      parser.fail("Missing required argument `{}`", arg.name);
-    }
-  }
-
-  T object = default_construct<T>(args_tuple);
-
-  // run options
-  for (auto&& option : parsed_opts) {
-    option(&object);
-  }
-
-  return object;
-}
 }  // namespace erl::_impl

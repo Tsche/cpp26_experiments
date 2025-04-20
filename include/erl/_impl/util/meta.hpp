@@ -8,6 +8,15 @@
 #include "string.hpp"
 
 namespace erl::meta {
+consteval bool is_derived_from(std::meta::info derived, std::meta::info base) {
+  for (auto tmp : bases_of(derived)){
+    if (type_of(tmp) == dealias(base)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 
 template <typename T>
 constexpr inline std::size_t base_count = bases_of(^^T).size();

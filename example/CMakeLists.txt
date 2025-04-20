@@ -14,5 +14,5 @@ add_library(demo_plugin SHARED "plugins/demo.cpp")
 target_link_libraries(demo_plugin PRIVATE erl)
 
 define_example(plugin)
-
+define_example(test)
 # define_example(modules)

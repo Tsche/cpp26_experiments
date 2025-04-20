@@ -12,7 +12,7 @@ struct CLI {
   template <typename T>
   [[= option]] [[noreturn]]
   static void help() {
-    constexpr static _impl::Spec<std::remove_cvref_t<T>> spec{};
+    constexpr static _impl::Spec spec{remove_cvref(^^T)};
     auto program_name = Program::name();
     std::string arguments{};
     for (auto argument : spec.arguments) {
@@ -97,10 +97,6 @@ struct CLI {
     std::exit(0);
   }
 };
-
-template <typename T>
-  requires(std::is_aggregate_v<T> && !std::is_array_v<T>)
-using ArgSpec = ::erl::_impl::Spec<T>;
 
 template <typename T>
 T parse_args(std::vector<std::string_view> args_in) {

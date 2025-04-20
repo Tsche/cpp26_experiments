@@ -1,13 +1,15 @@
 #include <erl/args>
 #include <erl/print>
+constexpr inline auto value = erl::CLI::value;
+constexpr inline auto option = erl::CLI::option;
 
-struct [[= erl::CLI::description("Example program.")]] Args : erl::CLI {
+struct [[= erl::CLI::description("Example program.")]] Args /* : erl::CLI */ {
   std::string text;
   [[=expect(2 < value < 17)]] 
   int times = 5;
 
   [[= option]] 
-  [[= description("sets logging verbosity")]]
+  [[= erl::CLI::description("sets logging verbosity")]]
   void verbosity([[=expect(value < 5)]] unsigned level) {
     std::println("verbosity: {}", level);
   }
@@ -18,7 +20,7 @@ struct [[= erl::CLI::description("Example program.")]] Args : erl::CLI {
   }
 
   [[= option]] 
-  [[= description("print program version")]]
+  [[= erl::CLI::description("print program version")]]
   static void version() {
     auto current_version = 1;
     std::println("v{}", current_version);
