@@ -27,7 +27,7 @@ consteval std::meta::info make_arg_tuple() {
       args.push_back(make_optional(arg));
     }
   } else if constexpr (is_class_type(reflection)) {
-    for (auto&& base : bases_of(reflection)) {
+    for (auto&& base : bases_of(dealias(reflection))) {
       args.push_back(extract<std::meta::info (*)()>(
           substitute(^^make_arg_tuple, {reflect_value(type_of(base))}))());
     }
@@ -47,7 +47,7 @@ using ArgumentTuple = [:make_arg_tuple<^^T>():];
 namespace _default_impl {
 #define $generate_case(Idx)                                                                        \
   case (Idx):                                                                                      \
-    if constexpr ((Idx) < Max) {                                                                   \
+    if constexpr ((Idx) <= Max) {                                                                   \
       return visitor(std::make_index_sequence<Offset + Idx>(), std::forward<Args>(extra_args)...); \
     }                                                                                              \
     std::unreachable();
@@ -117,7 +117,7 @@ decltype(auto) visit(F visitor, ArgumentTuple<T> const& args, Args&&... extra_ar
 
     return VisitStrategy<strategy_idx>::template visit<Required, branches>(
         visitor,
-        index - optional_min,
+        index - Required,
         std::forward<Args>(extra_args)...);
   }
 }
@@ -130,7 +130,7 @@ constexpr inline std::size_t required_arg_count = _default_impl::required_args_c
 template <typename T>
   requires(std::is_aggregate_v<T> && !std::is_array_v<T>)
 T default_construct(ArgumentTuple<T> const& args) {
-  constexpr static auto base_count = 0; //meta::base_count<T>;
+  constexpr static auto base_count = meta::base_count<T>;
 
   return _default_impl::visit<base_count, required_arg_count<dealias(^^T)>, T>(
       [&]<std::size_t... Idx, std::size_t... BIdx>(std::index_sequence<Idx...>,

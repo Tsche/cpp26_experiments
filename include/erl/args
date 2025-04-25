@@ -31,13 +31,13 @@ struct CLI {
     std::println("\nArguments:");
     for (auto argument : spec.arguments) {
       std::string constraint =
-          argument.constraint ? std::format("\n{:<8}requires: {}", "", argument.constraint) : "";
+          argument.constraint.empty() ? "" : std::format("\n{:<8}requires: {}", "", argument.constraint);
       std::println("    {} -> {}{}", argument.name, argument.type, constraint);
     }
 
     std::println("\nOptions:");
 
-    auto name_length = [](_impl::Option const& opt) { return std::strlen(opt.name); };
+    auto name_length = [](_impl::Option const& opt) { return opt.name.size(); };
     auto safe_max    = [&](std::span<_impl::Option const> const& opts) {
       return opts.empty() ? 0 : std::ranges::max(opts | std::views::transform(name_length));
     };
@@ -46,41 +46,37 @@ struct CLI {
     auto print_option = [&](_impl::Option opt) {
       std::string params;
       bool has_constraints = false;
-      for (std::size_t idx = 0; idx < opt.argument_count; ++idx) {
-        if (opt.arguments[idx].optional) {
-          params += std::format("[{}] ", opt.arguments[idx].name);
+      for (auto argument : opt.arguments) {
+        if (argument.optional) {
+          params += std::format("[{}] ", argument.name);
         } else {
-          params += std::format("{} ", opt.arguments[idx].name);
+          params += std::format("{} ", argument.name);
         }
-        if (opt.arguments[idx].constraint != nullptr) {
-          has_constraints = true;
-        }
+        has_constraints = !argument.constraint.empty();
       }
 
       std::println("    --{} {}", opt.name, params);
       std::size_t offset = max_name_length + 4 + 4;
-      if (opt.description) {
+      if (!opt.description.empty()) {
         std::println("{:<{}}{}\n", "", offset, opt.description);
       }
 
-      if (opt.argument_count != 0) {
+      if (opt.arguments.size() != 0) {
         std::println("{:<{}}Arguments:", "", offset);
-        for (std::size_t idx = 0; idx < opt.argument_count; ++idx) {
-          std::string constraint = opt.arguments[idx].constraint
-                                       ? std::format("\n{:<{}}requires: {}",
-                                                     "",
-                                                     offset + 8,
-                                                     opt.arguments[idx].constraint)
-                                       : "";
-          char const* optional   = "";
-          if (opt.arguments[idx].optional) {
+        for (auto argument : opt.arguments) {
+          std::string constraint =
+              argument.constraint.empty()
+                  ? ""
+                  : std::format("\n{:<{}}requires: {}", "", offset + 8, argument.constraint);
+          char const* optional = "";
+          if (argument.optional) {
             optional = " (optional)";
           }
           std::println("{:<{}}{} -> {}{}{}",
                        "",
                        offset + 4,
-                       opt.arguments[idx].name,
-                       opt.arguments[idx].type,
+                       argument.name,
+                       argument.type,
                        optional,
                        constraint);
         }

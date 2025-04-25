@@ -35,6 +35,7 @@ class ErlRecipe(ConanFile):
             self.options.rm_safe("fPIC")
 
     def requirements(self):
+        self.requires("rsl/0.1")
         self.test_requires("gtest/1.14.0")
 
     def layout(self):

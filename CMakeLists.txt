@@ -28,6 +28,9 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(erl PUBLIC Threads::Threads)
 
+find_package(rsl CONFIG REQUIRED)
+target_link_libraries(erl PUBLIC rsl::rsl)
+
 # add_subdirectory(modules)
 add_subdirectory(src)
 

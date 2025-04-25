@@ -3,7 +3,7 @@
 constexpr inline auto value = erl::CLI::value;
 constexpr inline auto option = erl::CLI::option;
 
-struct [[= erl::CLI::description("Example program.")]] Args /* : erl::CLI */ {
+struct [[= erl::CLI::description("Example program.")]] Args : erl::CLI {
   std::string text;
   [[=expect(2 < value < 17)]] 
   int times = 5;
@@ -30,5 +30,6 @@ struct [[= erl::CLI::description("Example program.")]] Args /* : erl::CLI */ {
 
 int main(int argc, const char** argv) {
   auto opts = erl::parse_args<Args>({argv, argv+argc});
+  // auto opts = erl::parse_args<Args>({"", "t"});
   erl::println("text: {text} \ntimes: {times}", opts);
 }

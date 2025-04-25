@@ -22,6 +22,9 @@
 
 #include <erl/info>
 
+#include <rsl/span>
+#include <rsl/string_view>
+
 namespace erl::_impl {
 template <typename T>
 T parse_value(std::string_view value) {
@@ -126,15 +129,16 @@ struct Argument {
   std::size_t index;
   parser_type parse;
 
-  char const* name;
-  char const* type;
-  char const* description;
+  rsl::string_view name;
+  rsl::string_view type;
+  rsl::string_view description;
   bool optional = false;
-  char const* constraint;
+  rsl::string_view constraint;
 
   template <std::meta::info R, auto Constraint>
   constexpr char const* stringify_constraint() {
     std::string _constraint = Constraint.to_string(identifier_of(R));
+    // strip outer parenthesis and make static
     return std::define_static_string(_constraint.substr(1, _constraint.size() - 2));
   }
 
@@ -150,8 +154,6 @@ struct Argument {
                                                    : has_default_member_initializer(reflection)) {
     if (auto desc = annotation_of_type<annotations::Description>(reflection); desc) {
       description = desc->data;
-    } else {
-      description = std::define_static_string("");
     }
 
     if (erl::meta::has_annotation(reflection, ^^erl::annotations::Expect)) {
@@ -159,8 +161,6 @@ struct Argument {
       constraint = (this->*meta::instantiate<char const* (Argument::*)()>(^^stringify_constraint,
                                                                           reflect_value(reflection),
                                                                           value_of(annotation)))();
-    } else {
-      constraint = nullptr;
     }
   }
 };
@@ -183,7 +183,7 @@ struct Option {
       } else if constexpr (is_function(R)) {
         default_invoke<R>(arg_tuple);
       } else if constexpr (is_object_type(type_of(R))) {
-        static_cast<[:parent_of(R):]*>(obj)->[:R:] = *get<0>(arg_tuple);
+        static_cast<[:parent_of(R):]*>(obj) -> [:R:] = *get<0>(arg_tuple);
       } else {
         static_assert(false, "Unsupported handler type.");
       }
@@ -198,10 +198,10 @@ struct Option {
       if (arg_name != name) {
         return false;
       }
-      ++parser.cursor; // parser will not unwind after this point
-      
+      ++parser.cursor;  // parser will not unwind after this point
+
       bool contd = true;
-      [:meta::sequence(sizeof...(args)):] >>= [&]<auto Idx>{
+      [:meta::sequence(sizeof...(args)):] >>= [&]<auto Idx> {
         if (!contd) {
           return;
         }
@@ -225,11 +225,9 @@ struct Option {
   using parser_type = bool (Unevaluated::*)(ArgParser&);
 
   parser_type parse;
-  char const* name;
-  char const* description = nullptr;
-
-  std::size_t argument_count;
-  Argument const* arguments;
+  rsl::string_view name;
+  rsl::string_view description = "";
+  rsl::span<Argument const> arguments;
 
   consteval Option(std::string_view name, std::meta::info reflection)
       : name(std::define_static_string(name)) {
@@ -246,8 +244,7 @@ struct Option {
       }
     }
 
-    argument_count = args.size();
-    arguments      = std::define_static_array(args).data();
+    arguments      = std::define_static_array(args);
 
     std::vector parse_args = {meta::promote(name), reflect_value(reflection)};
     for (auto arg : args) {
@@ -262,12 +259,17 @@ struct CLI;
 
 struct Spec {
   struct Parser {
+    std::vector<Spec> bases;
     std::vector<Argument> arguments;
     std::vector<Option> commands;
     std::vector<Option> options;
     // subspec for subcommands?
 
     consteval void parse(std::meta::info r) {
+      // for (auto base : bases_of(r)) {
+      //   bases.emplace_back(type_of(base));
+      // }
+
       for (auto member : members_of(r)) {
         if (!is_public(member) || !has_identifier(member)) {
           continue;
@@ -302,7 +304,8 @@ struct Spec {
         return false;
       }
 
-      arguments.emplace_back(arguments.size(), r);
+      auto base_offset = bases_of(parent_of(r)).size();
+      arguments.emplace_back(base_offset + arguments.size(), r);
       return true;
     }
 
@@ -324,89 +327,92 @@ struct Spec {
 
       if (is_nonstatic_data_member(r)) {
         if (!has_default_member_initializer(r)) {
-          compile_error(std::string("Option ") + identifier_of(r) + " lacks a default member initializer.");
+          compile_error(std::string("Option ") + identifier_of(r) +
+                        " lacks a default member initializer.");
         }
-      } else if (!is_function(r) || is_static_member(r)){
+      } else if (!is_function(r) || is_static_member(r)) {
         return false;
       }
 
       options.emplace_back(identifier_of(r), r);
       return true;
     }
-    };
-
-    std::span<Argument const> arguments;
-    std::span<Option const> commands;
-    std::span<Option const> options;
-
-    consteval explicit Spec(std::meta::info r) {
-      auto parser = Parser();
-      parser.parse(r);
-      parser.parse_base(r);
-      arguments = define_static_array(parser.arguments);
-      commands  = define_static_array(parser.commands);
-      options   = define_static_array(parser.options);
-    }
   };
 
-  template <typename T>
-  T parse_args(std::vector<std::string_view> args_in) {
-    static constexpr Spec spec{^^T};
-    auto parser          = ArgParser{args_in};
-    auto& [args, cursor] = parser;
+  rsl::span<rsl::span<Argument const>> bases;
+  rsl::span<Argument const> arguments;
+  rsl::span<Option const> commands;
+  rsl::span<Option const> options;
 
-    Program::set_name(args[0]);
-    cursor = 1;
-
-    std::vector<Argument::Unevaluated> parsed_args{};
-    for (auto Arg : spec.arguments) {
-      Argument::Unevaluated argument{};
-      if ((argument.*Arg.parse)(parser)) {
-        parsed_args.push_back(argument);
-      } else {
-        break;
-      }
-    }
-
-    std::vector<typename Option::Unevaluated> parsed_opts{};
-    auto [... Cmds] = [:meta::expand(spec.commands):];
-    auto [... Opts] = [:meta::expand(spec.options):];
-
-    while (parser.valid()) {
-      bool found = false;
-      typename Option::Unevaluated option{};
-
-      if (((option.*Cmds.parse)(parser) || ...)) {
-        // run commands right away
-        option(nullptr);
-        continue;
-      }
-
-      found = ((option.*Opts.parse)(parser) || ...);
-      if (!found) {
-        parser.fail("Could not find option `{}`", parser.current());
-      }
-      parsed_opts.push_back(option);
-    }
-
-    ArgumentTuple<T> args_tuple;
-    for (auto argument : parsed_args) {
-      argument(&args_tuple);
-    }
-
-    for (auto arg : spec.arguments | std::views::drop(parsed_args.size())) {
-      if (!arg.optional) {
-        parser.fail("Missing required argument `{}`", arg.name);
-      }
-    }
-
-    T object = default_construct<T>(args_tuple);
-
-    // run options
-    for (auto&& option : parsed_opts) {
-      option(&object);
-    }
-
-    return object;
+  consteval explicit Spec(std::meta::info r) {
+    auto parser = Parser();
+    parser.parse(r);
+    parser.parse_base(r);
+    // bases     = define_static_array(parser.bases);
+    arguments = define_static_array(parser.arguments);
+    commands  = define_static_array(parser.commands);
+    options   = define_static_array(parser.options);
   }
+};
+
+template <typename T>
+T parse_args(std::vector<std::string_view> args_in) {
+  static constexpr Spec spec{^^T};
+  auto parser          = ArgParser{args_in};
+  auto& [args, cursor] = parser;
+
+  Program::set_name(args[0]);
+  cursor = 1;
+
+  std::vector<Argument::Unevaluated> parsed_args{};
+  for (auto Arg : spec.arguments) {
+    Argument::Unevaluated argument{};
+    if ((argument.*Arg.parse)(parser)) {
+      parsed_args.push_back(argument);
+    } else {
+      break;
+    }
+  }
+
+  std::vector<typename Option::Unevaluated> parsed_opts{};
+  auto [... Cmds] = [:spec.commands:];
+  auto [... Opts] = [:spec.options:];
+
+  while (parser.valid()) {
+    bool found = false;
+    typename Option::Unevaluated option{};
+
+    if (((option.*Cmds.parse)(parser) || ...)) {
+      // run commands right away
+      option(nullptr);
+      continue;
+    }
+
+    found = ((option.*Opts.parse)(parser) || ...);
+    if (!found) {
+      parser.fail("Could not find option `{}`", parser.current());
+    }
+    parsed_opts.push_back(option);
+  }
+
+  ArgumentTuple<T> args_tuple;
+  for (auto argument : parsed_args) {
+    argument(&args_tuple);
+  }
+
+  for (auto arg : spec.arguments | std::views::drop(parsed_args.size())) {
+    if (!arg.optional) {
+      parser.fail("Missing required argument `{}`", arg.name);
+    }
+  }
+
+  T object = default_construct<T>(args_tuple);
+
+  // run options
+  for (auto&& option : parsed_opts) {
+    option(&object);
+  }
+
+  return object;
+}
 }  // namespace erl::_impl
