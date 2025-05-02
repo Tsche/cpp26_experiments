@@ -19,11 +19,18 @@
 #include <erl/_impl/log/format/color.hpp>
 
 #include <erl/_impl/compile_error.hpp>
-
 #include <erl/info>
 
 #include <rsl/span>
 #include <rsl/string_view>
+#include <vector>
+
+namespace erl {
+template <typename T>
+struct Variadic : std::vector<T> {
+  using std::vector<T>::vector;
+};
+}  // namespace erl
 
 namespace erl::_impl {
 template <typename T>
@@ -132,8 +139,9 @@ struct Argument {
   rsl::string_view name;
   rsl::string_view type;
   rsl::string_view description;
-  bool optional = false;
   rsl::string_view constraint;
+  bool is_optional = false;
+  bool is_variadic = false;
 
   template <std::meta::info R, auto Constraint>
   constexpr char const* stringify_constraint() {
@@ -150,8 +158,9 @@ struct Argument {
       , name(std::define_static_string(identifier_of(reflection)))
       , type(std::define_static_string(
             display_string_of(type_of(reflection))))  // TODO clean at this point?
-      , optional(is_function_parameter(reflection) ? has_default_argument(reflection)
-                                                   : has_default_member_initializer(reflection)) {
+      , is_optional(is_function_parameter(reflection)
+                        ? has_default_argument(reflection)
+                        : has_default_member_initializer(reflection)) {
     if (auto desc = annotation_of_type<annotations::Description>(reflection); desc) {
       description = desc->data;
     }
@@ -210,7 +219,7 @@ struct Option {
         if ((argument.*args...[Idx].parse)(parser)) {
           arguments.push_back(argument);
         } else {
-          if (!args...[Idx].optional) {
+          if (!args...[Idx].is_optional) {
             parser.fail("Missing argument {} of option {}", args...[Idx].name, arg_name);
             contd = false;
           }
@@ -244,7 +253,7 @@ struct Option {
       }
     }
 
-    arguments      = std::define_static_array(args);
+    arguments = std::define_static_array(args);
 
     std::vector parse_args = {meta::promote(name), reflect_value(reflection)};
     for (auto arg : args) {
@@ -258,12 +267,20 @@ struct Option {
 struct CLI;
 
 struct Spec {
-  struct Parser {
-    std::vector<Spec> bases;
+  class Parser {
+    // options and commands from bases are directly folded into this spec
+    std::vector<std::vector<Argument>> bases;
+
+    // arguments are positional options required to construct the settings container
     std::vector<Argument> arguments;
-    std::vector<Option> commands;
+    // - or -- prefixed options, can be non-static member functions
     std::vector<Option> options;
-    // subspec for subcommands?
+    // options that are executed before constructing an object of the wrapped type
+    std::vector<Option> commands;
+
+    // subcommands change parser context, they do not need `--` prefix
+    // but cannot be used in combination with variadic or optional arguments
+    std::vector<Spec> subcommands;
 
     consteval void parse(std::meta::info r) {
       // for (auto base : bases_of(r)) {
@@ -279,7 +296,7 @@ struct Spec {
     }
 
     consteval void parse_base(std::meta::info r) {
-      if (meta::is_derived_from(r, ^^CLI)) {
+      if (meta::is_derived_from(dealias(r), ^^CLI)) {
         for (auto fnc_template :
              members_of(^^CLI) | std::views::filter(std::meta::is_function_template)) {
           if (!can_substitute(fnc_template, {r})) {
@@ -337,17 +354,57 @@ struct Spec {
       options.emplace_back(identifier_of(r), r);
       return true;
     }
+
+    consteval void validate() {
+      bool has_variadic = false;
+      bool has_optional = false;
+
+      for (auto&& argument : arguments) {
+        if (has_variadic) {
+          // we've already seen a variadic argument, no arguments can follow it
+          // error
+          compile_error("Non-variadic argument after a variadic argument is not allowed.");
+        }
+
+        if (argument.is_variadic) {
+          has_variadic = true;
+          continue;
+        }
+
+        if (argument.is_optional) {
+          has_optional = true;
+        } else if (has_optional) {
+          // we've seen an optional argument already but this one isn't
+          compile_error("Non-optional argument after an optional argument is not allowed.");
+        }
+      }
+
+      if (!subcommands.empty()) {
+        if (has_variadic) {
+          compile_error("Variadic arguments and subcommands cannot be combined.");
+        }
+
+        if (has_optional) {
+          compile_error("Optional arguments and subcommands cannot be combined.");
+        }
+      }
+    }
+
+    friend struct Spec;
   };
 
+  rsl::string_view name;
   rsl::span<rsl::span<Argument const>> bases;
   rsl::span<Argument const> arguments;
   rsl::span<Option const> commands;
   rsl::span<Option const> options;
 
-  consteval explicit Spec(std::meta::info r) {
+  consteval explicit Spec(std::meta::info r) : name(identifier_of(r)) {
+    auto type   = is_type(r) ? r : type_of(r);
     auto parser = Parser();
-    parser.parse(r);
-    parser.parse_base(r);
+    parser.parse(type);
+    parser.parse_base(type);
+    parser.validate();
     // bases     = define_static_array(parser.bases);
     arguments = define_static_array(parser.arguments);
     commands  = define_static_array(parser.commands);
@@ -401,7 +458,7 @@ T parse_args(std::vector<std::string_view> args_in) {
   }
 
   for (auto arg : spec.arguments | std::views::drop(parsed_args.size())) {
-    if (!arg.optional) {
+    if (!arg.is_optional) {
       parser.fail("Missing required argument `{}`", arg.name);
     }
   }

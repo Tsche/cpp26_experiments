@@ -16,7 +16,7 @@ struct CLI {
     auto program_name = Program::name();
     std::string arguments{};
     for (auto argument : spec.arguments) {
-      if (argument.optional) {
+      if (argument.is_optional) {
         arguments += std::format("[{}] ", argument.name);
       } else {
         arguments += std::format("{} ", argument.name);
@@ -47,7 +47,7 @@ struct CLI {
       std::string params;
       bool has_constraints = false;
       for (auto argument : opt.arguments) {
-        if (argument.optional) {
+        if (argument.is_optional) {
           params += std::format("[{}] ", argument.name);
         } else {
           params += std::format("{} ", argument.name);
@@ -69,7 +69,7 @@ struct CLI {
                   ? ""
                   : std::format("\n{:<{}}requires: {}", "", offset + 8, argument.constraint);
           char const* optional = "";
-          if (argument.optional) {
+          if (argument.is_optional) {
             optional = " (optional)";
           }
           std::println("{:<{}}{} -> {}{}{}",

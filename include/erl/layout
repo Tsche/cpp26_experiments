@@ -1,0 +1,107 @@
+#pragma once
+#include <algorithm>
+#include <string>
+#include <experimental/meta>
+#include <unordered_map>
+
+/* Auto layout optimization
+
+This takes an aggregate and reorders its non-static data members to compress
+the resulting object as much as possible.
+
+Additionally a proxy type is produced to wrap the reordered aggregate to map
+the old order to the new one.
+*/
+
+namespace erl {
+namespace _layout_impl {
+consteval bool is_optimal_layout(std::meta::info r) {
+  return true;
+}
+
+consteval std::vector<std::pair<int, int>> get_mapping(std::meta::info r) {}
+
+struct Reorder {};
+
+struct BoolBitfields {};
+struct MultiOptional {};
+
+struct MemberInfo {
+  bool is_bool;
+  std::size_t size;
+  std::size_t alignment;
+};
+
+consteval auto reorder(std::meta::info r) {
+  // alignment -> list[member]
+  std::unordered_map<std::size_t, std::vector<std::meta::info>> by_alignment;
+  std::vector<std::meta::info> bools;
+
+  for (auto member : nonstatic_data_members_of(r)) {
+    if (type_of(member) == ^^bool) {
+      bools.push_back(member);
+    }
+    by_alignment[alignment_of(member)].push_back(member);
+  }
+}
+
+consteval bool can_compress(std::meta::info r) {
+  return !std::ranges::any_of(members_of(r), [](auto m) {
+    // we can only compress aggregates with only nsdms
+    return !is_special_member_function(m) && has_identifier(m) && !is_nonstatic_data_member(m);
+  });
+}
+
+template <std::meta::info R>
+consteval std::meta::info make_compressed() {
+  if constexpr (!can_compress(R)) {
+    static_assert(
+        false,
+        "Cannot compress aggregate types with members other than non-static data members.");
+  } else if constexpr (is_optimal_layout(R)) {
+    return R;
+  } else {
+    struct result;
+    consteval {
+      auto mapping = get_mapping(R);
+      define_aggregate(^^result, {});
+    };
+    return ^^result;
+  }
+}
+
+template <std::meta::info R>
+  requires(!is_optimal_layout(R) && can_compress(R))
+consteval std::meta::info make_proxy() {
+  if constexpr (is_optimal_layout(R)) {
+    return R;
+  } else {
+    struct result;
+    consteval {
+      // TODO
+      define_aggregate(^^result, {});
+    };
+    return ^^result;
+  }
+}
+}  // namespace _layout_impl
+
+template <typename T>
+  requires(std::is_aggregate_v<T> && !std::is_array_v<T>)
+using Compressed = [:_layout_impl::make_compressed<^^T>():];
+
+template <typename T>
+  requires(std::is_aggregate_v<T> && !std::is_array_v<T>)
+using CompressedProxy = [:_layout_impl::make_proxy<^^T>():];
+
+template <typename T>
+concept is_optimal_layout =
+    std::is_aggregate_v<T> && !std::is_array_v<T> && _layout_impl::is_optimal_layout(^^T);
+
+consteval std::string layout_suggestions(std::meta::info r) {
+  if (_layout_impl::is_optimal_layout(r)) {
+    return "";
+  }
+  // TODO
+}
+}  // namespace erl
